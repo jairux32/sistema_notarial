@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema Notarial - Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <div class="container fade-in">
+        <!-- Header -->
+        <div class="header">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                <div>
+                    <h1>📋 Sistema de Procesamiento Notarial</h1>
+                    <p>Resolución 202-2021 - Procesador Automático de Protocolos</p>
+                </div>
+                <a href="{{ url_for('logout') }}" class="btn btn-danger">
+                    🚪 Cerrar Sesión
+                </a>
+            </div>
+        </div>
+
+        <!-- Información del sistema -->
+        <div class="info-grid">
+            <div class="info-card">
+                <div class="info-card-label">🏛️ Notaría</div>
+                <div class="info-card-value">1101007</div>
+            </div>
+            <div class="info-card">
+                <div class="info-card-label">📅 Años Disponibles</div>
+                <div class="info-card-value">2014 - 2030</div>
+            </div>
+            <div class="info-card">
+                <div class="info-card-label">📚 Tipos de Libro</div>
+                <div class="info-card-value">5 Categorías</div>
+            </div>
+            <div class="info-card">
+                <div class="info-card-label">⚡ Estado</div>
+                <div class="info-card-value" style="color: #22c55e;">● Operativo</div>
+            </div>
+        </div>
+
+        <!-- Formulario de procesamiento -->
+        <div class="card">
+            <h2>🔍 Procesar Protocolo Notarial</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 2rem;">
+                Sube un archivo PDF para procesarlo automáticamente con OCR y dividirlo según los códigos notariales
+                encontrados.
+            </p>
+
+            <form id="uploadForm" enctype="multipart/form-data">
+                <div class="info-grid">
+                    <div class="form-group">
+                        <label for="año">📅 Año del Protocolo</label>
+                        <select name="año" id="año" required>
+                            {% for año in años %}
+                            <option value="{{ año }}">{{ año }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="tipo_libro">📚 Tipo de Libro</label>
+                        <select name="tipo_libro" id="tipo_libro" required>
+                            {% for letra, nombre in tipos %}
+                            <option value="{{ letra }}">{{ nombre }} ({{ letra }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="pdf_file">📄 Archivo PDF a Procesar</label>
+                    <input type="file" name="pdf_file" id="pdf_file" accept=".pdf" required>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.5rem;">
+                        Sin límite de tamaño • Formato: PDF
+                    </p>
+                </div>
+
+                <button type="submit" class="btn btn-success"
+                    style="width: 100%; padding: 1.25rem; font-size: 1.05rem;">
+                    <span id="btnText">🚀 Procesar Archivo</span>
+                    <span id="btnLoader" style="display: none;">
+                        <span class="spinner"></span> Procesando...
+                    </span>
+                </button>
+            </form>
+        </div>
+
+        <!-- Barra de progreso -->
+        <div id="progressContainer" style="display: none;" class="progress-container fade-in">
+            <h3 style="margin-bottom: 1rem; color: var(--text-primary);">
+                ⏳ Procesamiento en Curso
+            </h3>
+            <p id="progressText" style="color: var(--text-secondary); margin-bottom: 0.5rem;">
+                Iniciando procesamiento...
+            </p>
+            <div class="progress-bar">
+                <div id="progressFill" class="progress-fill" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <!-- Resultados -->
+        <div id="resultContainer" style="display: none;"></div>
+
+        <!-- Modal para agregar código manual -->
+        <div id="modalAgregarCodigo"
+            style="display: none; position: fixed; top: 0; left: 0; 
+             width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
+            <div style="background: var(--bg-primary); max-width: 500px; margin: 100px auto; 
+                 padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                <h3 style="color: var(--text-primary); margin-bottom: 0.5rem;">➕ Agregar Código Manual</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
+                    Agrega un código que el OCR no detectó
+                </p>
+
+                <div class="form-group">
+                    <label for="codigoManual">Código Completo</label>
+                    <input type="text" id="codigoManual" placeholder="20251101007A00056"
+                        style="font-family: monospace;">
+                </div>
+
+                <div class="form-group">
+                    <label for="paginaInicio">Página de Inicio (0-indexed)</label>
+                    <input type="number" id="paginaInicio" placeholder="320" min="0">
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.5rem;">
+                        La primera página del documento es 0
+                    </p>
+                </div>
+
+                <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+                    <button onclick="agregarCodigoManual()" class="btn btn-success">
+                        ✅ Agregar y Reprocesar
+                    </button>
+                    <button onclick="cerrarModalAgregarCodigo()" class="btn btn-secondary">
+                        Cancelar
+                    </button>
+                </div>
+
+                <div id="mensajeModal" style="margin-top: 1rem;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('uploadForm');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const resultContainer = document.getElementById('resultContainer');
+        const btnText = document.getElementById('btnText');
+        const btnLoader = document.getElementById('btnLoader');
+
+        let currentSessionId = null;
+
+        form.addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            // Validar archivo
+            const fileInput = document.getElementById('pdf_file');
+            if (!fileInput.files[0]) {
+                showAlert('Por favor selecciona un archivo PDF', 'error');
+                return;
+            }
+
+            // Preparar formulario
+            const formData = new FormData(this);
+
+            // Mostrar progreso
+            progressContainer.style.display = 'block';
+            resultContainer.style.display = 'none';
+            btnText.style.display = 'none';
+            btnLoader.style.display = 'inline';
+            form.querySelector('button').disabled = true;
+
+            // Paso 1: Subiendo
+            updateProgress(15, 'Subiendo archivo al servidor...');
+
+            try {
+                // Simular progreso de subida
+                await sleep(500);
+                updateProgress(30, 'Archivo recibido, iniciando OCR...');
+
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                updateProgress(60, 'Procesando OCR y extrayendo códigos...');
+                await sleep(800);
+
+                updateProgress(85, 'Dividiendo PDF y generando reportes...');
+                const data = await response.json();
+
+                updateProgress(100, '✅ ¡Procesamiento completado!');
+
+                // Mostrar resultados
+                setTimeout(() => {
+                    displayResults(data);
+                    progressContainer.style.display = 'none';
+                    resetForm();
+                }, 1000);
+
+            } catch (error) {
+                showAlert('Error de conexión: ' + error.message, 'error');
+                progressContainer.style.display = 'none';
+                resetForm();
+            }
+        });
+
+        function updateProgress(percent, text) {
+            progressFill.style.width = percent + '%';
+            progressText.textContent = text;
+        }
+
+        function displayResults(data) {
+            resultContainer.style.display = 'block';
+            resultContainer.className = 'card fade-in';
+
+            if (data.error) {
+                resultContainer.innerHTML = `
+                    <div class="alert alert-error">
+                        <strong>❌ Error en el procesamiento</strong><br>
+                        ${data.error}
+                    </div>
+                `;
+                return;
+            }
+
+            // Guardar session_id
+            if (data.session_id) {
+                currentSessionId = data.session_id;
+            }
+
+            const validacion = data.validacion || {};
+            const esContinuo = validacion.es_continuo ? '✅ Continuo' : '⚠️ Con saltos';
+            const faltantes = validacion.faltantes || [];
+
+            // Sección de códigos faltantes
+            let codigosFaltantesHTML = '';
+            if (data.codigos_faltantes && data.codigos_faltantes.length > 0) {
+                codigosFaltantesHTML = `
+                    <div class="alert alert-warning" style="margin-bottom: 1.5rem;">
+                        <strong>⚠️ Códigos Faltantes Detectados</strong><br>
+                        El OCR no detectó los siguientes códigos en el rango esperado:<br>
+                        <div style="margin-top: 0.5rem; font-family: monospace; color: var(--text-primary);">
+                            ${data.codigos_faltantes.join(', ')}
+                        </div>
+                        <button onclick="mostrarModalAgregarCodigo()" 
+                                class="btn btn-primary" 
+                                style="margin-top: 1rem;">
+                            ➕ Agregar Código Manual
+                        </button>
+                    </div>
+                `;
+            }
+
+            resultContainer.innerHTML = `
+                ${codigosFaltantesHTML}
+                
+                <div class="alert alert-success">
+                    <strong>✅ ¡Procesamiento Exitoso!</strong><br>
+                    El archivo ha sido procesado correctamente.
+                </div>
+
+                <h2 style="margin-bottom: 1.5rem;">📊 Resultados del Procesamiento</h2>
+
+                <div class="info-grid">
+                    <div class="info-card">
+                        <div class="info-card-label">📁 Archivos Generados</div>
+                        <div class="info-card-value" style="color: #22c55e;">${data.archivos_generados}</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-card-label">🔢 Códigos Encontrados</div>
+                        <div class="info-card-value">${data.codigos_encontrados ? data.codigos_encontrados.length : 0}</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-card-label">📋 Secuencial</div>
+                        <div class="info-card-value">${esContinuo}</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-card-label">📂 Ruta de Salida</div>
+                        <div class="info-card-value" style="font-size: 0.9rem;">${data.ruta_salida}</div>
+                    </div>
+                </div>
+
+                <div class="result-box">
+                    <h3>📈 Detalles de Validación</h3>
+                    <div class="result-item">
+                        <span class="result-label">Primer Secuencial:</span>
+                        <span class="result-value">${validacion.primer_secuencial || 'N/A'}</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">Último Secuencial:</span>
+                        <span class="result-value">${validacion.ultimo_secuencial || 'N/A'}</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">Rango Esperado:</span>
+                        <span class="result-value">${validacion.rango_esperado || 'N/A'}</span>
+                    </div>
+                    ${faltantes.length > 0 ? `
+                    <div class="result-item">
+                        <span class="result-label">Secuenciales Faltantes:</span>
+                        <span class="result-value" style="color: #f59e0b;">${faltantes.join(', ')}</span>
+                    </div>
+                    ` : ''}
+                </div>
+
+                ${data.reporte_path ? `
+                <div style="margin-top: 1.5rem;">
+                    <a href="/download/${data.reporte_path.split('/').pop()}" 
+                       class="btn btn-primary" 
+                       style="display: inline-block; text-decoration: none;"
+                       target="_blank">
+                        📥 Descargar Reporte PDF
+                    </a>
+                </div>
+                ` : ''}
+            `;
+
+            // Scroll suave al resultado
+            resultContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        function showAlert(message, type) {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} fade-in`;
+            alertDiv.textContent = message;
+
+            const container = document.querySelector('.container');
+            container.insertBefore(alertDiv, container.firstChild);
+
+            setTimeout(() => alertDiv.remove(), 5000);
+        }
+
+        function resetForm() {
+            btnText.style.display = 'inline';
+            btnLoader.style.display = 'none';
+            form.querySelector('button').disabled = false;
+        }
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // Funciones para modal de agregar código manual
+        function mostrarModalAgregarCodigo() {
+            document.getElementById('modalAgregarCodigo').style.display = 'flex';
+        }
+
+        function cerrarModalAgregarCodigo() {
+            document.getElementById('modalAgregarCodigo').style.display = 'none';
+            document.getElementById('codigoManual').value = '';
+            document.getElementById('paginaInicio').value = '';
+            document.getElementById('mensajeModal').innerHTML = '';
+        }
+
+        async function agregarCodigoManual() {
+            const codigo = document.getElementById('codigoManual').value.trim();
+            const pagina = document.getElementById('paginaInicio').value;
+            const mensajeDiv = document.getElementById('mensajeModal');
+
+            // Validar
+            if (!codigo || !pagina) {
+                mensajeDiv.innerHTML = '<div class="alert alert-error">Por favor completa todos los campos</div>';
+                return;
+            }
+
+            // Validar formato de código
+            const patron = /^\d{4}1101007[A-Z]\d{5}$/;
+            if (!patron.test(codigo)) {
+                mensajeDiv.innerHTML = '<div class="alert alert-error">Formato de código inválido. Debe ser: AAAA1101007XNNNNN</div>';
+                return;
+            }
+
+            if (!currentSessionId) {
+                mensajeDiv.innerHTML = '<div class="alert alert-error">Sesión no encontrada. Por favor procesa un archivo primero.</div>';
+                return;
+            }
+
+            mensajeDiv.innerHTML = '<div class="alert alert-info">⏳ Reprocesando...</div>';
+
+            try {
+                const response = await fetch('/agregar_codigo_manual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: currentSessionId,
+                        codigo: codigo,
+                        pagina_inicio: parseInt(pagina)
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    mensajeDiv.innerHTML = '<div class="alert alert-success">✅ ' + data.mensaje + '</div>';
+
+                    // Actualizar resultados
+                    setTimeout(() => {
+                        displayResults(data);
+                        cerrarModalAgregarCodigo();
+                    }, 1500);
+                } else {
+                    mensajeDiv.innerHTML = '<div class="alert alert-error">❌ ' + data.error + '</div>';
+                }
+            } catch (error) {
+                mensajeDiv.innerHTML = '<div class="alert alert-error">❌ Error: ' + error.message + '</div>';
+            }
+        }
+    </script>
+</body>
+
+</html>

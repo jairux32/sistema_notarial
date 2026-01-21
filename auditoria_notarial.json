@@ -1,0 +1,110 @@
+[
+  {
+    "timestamp": "2026-01-20T21:35:24.782781",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
+  },
+  {
+    "timestamp": "2026-01-21T00:13:41.752394",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
+  },
+  {
+    "timestamp": "2026-01-21T00:18:05.234670",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
+  },
+  {
+    "timestamp": "2026-01-21T09:07:16.031505",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
+  },
+  {
+    "timestamp": "2026-01-21T10:03:03.240018",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
+  },
+  {
+    "timestamp": "2026-01-21T10:51:33.117802",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
+  },
+  {
+    "timestamp": "2026-01-21T10:57:22.789366",
+    "usuario": "admin",
+    "accion": "PROCESAMIENTO",
+    "archivo": "arriendos_enero-marzo_2025.pdf",
+    "a\u00f1o": "2025",
+    "tipo": "A",
+    "resultado": true,
+    "archivos_generados": 8,
+    "codigos_encontrados": 11,
+    "errores": null
+  },
+  {
+    "timestamp": "2026-01-21T11:06:08.062448",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
+  },
+  {
+    "timestamp": "2026-01-21T11:10:41.713597",
+    "usuario": "admin",
+    "accion": "PROCESAMIENTO",
+    "archivo": "arriendos_enero-marzo_2025.pdf",
+    "a\u00f1o": "2025",
+    "tipo": "A",
+    "resultado": true,
+    "archivos_generados": 53,
+    "codigos_encontrados": 55,
+    "errores": null
+  },
+  {
+    "timestamp": "2026-01-21T11:25:59.414682",
+    "usuario": "admin",
+    "accion": "PROCESAMIENTO",
+    "archivo": "prot_1_enero_2025.pdf",
+    "a\u00f1o": "2025",
+    "tipo": "P",
+    "resultado": true,
+    "archivos_generados": 71,
+    "codigos_encontrados": 77,
+    "errores": null
+  },
+  {
+    "timestamp": "2026-01-21T11:58:16.633443",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
+  },
+  {
+    "timestamp": "2026-01-21T11:59:37.788842",
+    "usuario": "admin",
+    "accion": "PROCESAMIENTO",
+    "archivo": "prot_1_enero_2025.pdf",
+    "a\u00f1o": "2025",
+    "tipo": "P",
+    "resultado": true,
+    "archivos_generados": 75,
+    "codigos_encontrados": 75,
+    "errores": null
+  },
+  {
+    "timestamp": "2026-01-21T12:10:23.636045",
+    "usuario": "admin",
+    "accion": "PROCESAMIENTO",
+    "archivo": "P01.pdf",
+    "a\u00f1o": "2016",
+    "tipo": "P",
+    "resultado": true,
+    "archivos_generados": 81,
+    "codigos_encontrados": 83,
+    "errores": null
+  }
+]
