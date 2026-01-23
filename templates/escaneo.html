@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Módulo de Escaneo - Sistema Notarial</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .scan-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 2rem;
+            border-radius: 12px;
+            color: white;
+            margin-bottom: 2rem;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+        }
+
+        .scan-header h1 {
+            margin: 0;
+            font-size: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .scan-header p {
+            margin: 0.5rem 0 0 0;
+            opacity: 0.9;
+        }
+
+        .config-panel {
+            background: var(--bg-secondary);
+            padding: 1.5rem;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .file-card {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 1.5rem;
+            border: 2px solid var(--border-color);
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .file-card:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+        }
+
+        .file-card.selected {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .file-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .file-name {
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 1.1rem;
+        }
+
+        .file-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .badge-success {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+        }
+
+        .badge-error {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        .badge-warning {
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+        }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .preview-section {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 2rem;
+            margin-top: 2rem;
+        }
+
+        .codes-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 0.5rem;
+            max-height: 300px;
+            overflow-y: auto;
+            background: var(--bg-primary);
+            padding: 1rem;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+
+        .code-item {
+            padding: 0.5rem;
+            background: var(--bg-secondary);
+            border-radius: 4px;
+            border-left: 3px solid #667eea;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .btn-large {
+            padding: 1rem 2rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.7;
+            }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--text-secondary);
+        }
+
+        .empty-state-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header mejorado -->
+        <div class="scan-header">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h1>📄 Módulo de Escaneo Inteligente</h1>
+                    <p>Procesamiento automático de documentos escaneados con OCR híbrido</p>
+                </div>
+                <div style="display: flex; gap: 0.5rem;">
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">← Dashboard</a>
+                    <a href="{{ url_for('logout') }}" class="btn btn-secondary">Cerrar Sesión</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Panel de configuración -->
+        <div class="card">
+            <h3 style="margin-bottom: 1.5rem;">⚙️ Configuración de Procesamiento</h3>
+            <div class="config-panel">
+                <div class="config-grid">
+                    <div class="form-group">
+                        <label for="año">📅 Año</label>
+                        <input type="number" id="año" value="2025" min="2014" max="2030">
+                    </div>
+                    <div class="form-group">
+                        <label for="tipo">📚 Tipo de Libro</label>
+                        <select id="tipo">
+                            <option value="A">📋 Arriendos</option>
+                            <option value="P">📜 Protocolo</option>
+                            <option value="D">📝 Diligencia</option>
+                            <option value="C">🎓 Certificaciones</option>
+                            <option value="O">📂 Otros</option>
+                        </select>
+                    </div>
+                </div>
+                <button onclick="detectarNuevos()" class="btn btn-primary btn-large" id="btnDetectar"
+                    style="width: 100%;">
+                    🔍 Buscar Nuevos Documentos Escaneados
+                </button>
+            </div>
+        </div>
+
+        <!-- Instrucciones -->
+        <div class="card"
+            style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);">
+            <h3>💡 ¿Cómo funciona?</h3>
+            <div
+                style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: 1rem;">
+                <div style="text-align: center; padding: 1rem;">
+                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">📥</div>
+                    <strong>1. Escanear</strong>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem;">
+                        Guarda PDFs en carpeta <code>scanned/</code>
+                    </p>
+                </div>
+                <div style="text-align: center; padding: 1rem;">
+                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">🔍</div>
+                    <strong>2. Detectar</strong>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem;">
+                        Sistema busca archivos nuevos
+                    </p>
+                </div>
+                <div style="text-align: center; padding: 1rem;">
+                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">✅</div>
+                    <strong>3. Revisar</strong>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem;">
+                        Verifica códigos detectados
+                    </p>
+                </div>
+                <div style="text-align: center; padding: 1rem;">
+                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">📤</div>
+                    <strong>4. Procesar</strong>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem;">
+                        Genera PDFs individuales
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Resultados de detección -->
+        <div id="resultadosDeteccion" style="display: none;"></div>
+
+        <!-- Vista previa y procesamiento -->
+        <div id="vistaPrevia" style="display: none;"></div>
+
+        <!-- Modal para agregar código manual -->
+        <div id="modalCodigoManual" style="display: none; position: fixed; top: 0; left: 0; 
+             width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; 
+             align-items: center; justify-content: center;">
+            <div style="background: var(--bg-primary); max-width: 500px; margin: 100px auto; 
+                 padding: 2rem; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.5);">
+                <h3 style="color: var(--text-primary); margin-bottom: 0.5rem;">➕ Agregar Código Manual</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
+                    Agrega un código que el OCR no detectó
+                </p>
+
+                <div class="form-group">
+                    <label for="codigoManualInput">Código Completo</label>
+                    <input type="text" id="codigoManualInput" placeholder="20251101007A00056"
+                        style="font-family: monospace; font-size: 1.1rem;">
+                </div>
+
+                <div class="form-group">
+                    <label for="paginaInicioInput">Página de Inicio (0-indexed)</label>
+                    <input type="number" id="paginaInicioInput" placeholder="0" min="0">
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.5rem;">
+                        💡 La primera página del documento es 0
+                    </p>
+                </div>
+
+                <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+                    <button onclick="agregarCodigoManual()" class="btn btn-success" style="flex: 1;">
+                        ✅ Agregar y Reprocesar
+                    </button>
+                    <button onclick="cerrarModalCodigo()" class="btn btn-secondary">
+                        Cancelar
+                    </button>
+                </div>
+
+                <div id="mensajeModalCodigo" style="margin-top: 1rem;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let archivosDetectados = [];
+        let archivoActual = null;
+        let codigosActuales = [];
+
+        async function detectarNuevos() {
+            const año = document.getElementById('año').value;
+            const tipo = document.getElementById('tipo').value;
+            const btnDetectar = document.getElementById('btnDetectar');
+
+            btnDetectar.disabled = true;
+            btnDetectar.innerHTML = '<span class="pulse">⏳ Detectando archivos...</span>';
+
+            try {
+                const response = await fetch(`/escaneo/detectar_nuevos?año=${año}&tipo=${tipo}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    archivosDetectados = data.resultados;
+                    mostrarResultados(data.resultados);
+                } else {
+                    mostrarEstadoVacio(data.mensaje);
+                }
+            } catch (error) {
+                mostrarMensaje('Error: ' + error.message, 'error');
+            } finally {
+                btnDetectar.disabled = false;
+                btnDetectar.innerHTML = '🔍 Buscar Nuevos Documentos Escaneados';
+            }
+        }
+
+        function mostrarEstadoVacio(mensaje) {
+            const container = document.getElementById('resultadosDeteccion');
+            container.style.display = 'block';
+            container.innerHTML = `
+                <div class="card empty-state">
+                    <div class="empty-state-icon">📭</div>
+                    <h3>No hay archivos nuevos</h3>
+                    <p>${mensaje}</p>
+                    <p style="margin-top: 1rem; color: var(--text-muted);">
+                        Guarda tus documentos escaneados en la carpeta <code>scanned/</code>
+                    </p>
+                </div>
+            `;
+        }
+
+        function mostrarResultados(resultados) {
+            const container = document.getElementById('resultadosDeteccion');
+            container.style.display = 'block';
+
+            let html = '<div class="card"><h3 style="margin-bottom: 1.5rem;">📁 Archivos Detectados (' + resultados.length + ')</h3>';
+            html += '<div style="display: grid; gap: 1rem;">';
+
+            resultados.forEach((resultado, index) => {
+                const estado = resultado.estado === 'listo' ? 'success' : 'error';
+                const icono = resultado.estado === 'listo' ? '✅' : '❌';
+
+                html += `
+                    <div class="file-card ${resultado.estado === 'listo' ? '' : 'error'}" onclick="verDetalle(${index})">
+                        <div class="file-header">
+                            <div class="file-name">${icono} ${resultado.nombre}</div>
+                            <span class="file-badge badge-${estado}">
+                                ${resultado.estado === 'listo' ? 'Listo' : 'Error'}
+                            </span>
+                        </div>
+                        ${resultado.estado === 'listo' ? `
+                            <div class="stats-row">
+                                <div class="stat-item">
+                                    <span>🔢</span>
+                                    <span><strong>${resultado.total_codigos}</strong> códigos</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span>📝</span>
+                                    <span><strong>${(resultado.caracteres_extraidos / 1000).toFixed(1)}k</strong> caracteres</span>
+                                </div>
+                            </div>
+                            <button class="btn btn-primary" style="width: 100%; margin-top: 1rem;" onclick="event.stopPropagation(); verDetalle(${index})">
+                                Ver Detalle →
+                            </button>
+                        ` : `
+                            <p style="color: var(--text-secondary); margin-top: 0.5rem;">
+                                Error: ${resultado.error}
+                            </p>
+                        `}
+                    </div>
+                `;
+            });
+
+            html += '</div></div>';
+            container.innerHTML = html;
+            container.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function verDetalle(index) {
+            const resultado = archivosDetectados[index];
+            archivoActual = resultado.archivo;
+            codigosActuales = resultado.codigos;
+
+            const container = document.getElementById('vistaPrevia');
+            container.style.display = 'block';
+
+            const validacion = resultado.validacion || {};
+            const faltantes = validacion.faltantes || [];
+
+            let html = `
+                <div class="preview-section">
+                    <h3 style="margin-bottom: 1.5rem;">📄 ${resultado.nombre}</h3>
+                    
+                    <div class="info-grid" style="margin-bottom: 1.5rem;">
+                        <div class="info-card">
+                            <div class="info-card-label">🔢 Códigos Detectados</div>
+                            <div class="info-card-value" style="color: #667eea;">${resultado.total_codigos}</div>
+                        </div>
+                        <div class="info-card">
+                            <div class="info-card-label">📝 Caracteres</div>
+                            <div class="info-card-value">${resultado.caracteres_extraidos.toLocaleString()}</div>
+                        </div>
+                        <div class="info-card">
+                            <div class="info-card-label">📊 Secuencial</div>
+                            <div class="info-card-value">${validacion.es_continuo ? '✅ Continuo' : '⚠️ Con saltos'}</div>
+                        </div>
+                        <div class="info-card">
+                            <div class="info-card-label">⚠️ Faltantes</div>
+                            <div class="info-card-value" style="color: ${faltantes.length > 0 ? '#f59e0b' : '#22c55e'};">
+                                ${faltantes.length}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    ${faltantes.length > 0 ? `
+                        <div class="alert alert-warning" style="margin-bottom: 1.5rem;">
+                            <strong>⚠️ Códigos Faltantes Detectados (${faltantes.length})</strong><br>
+                            <div style="margin-top: 0.5rem; font-family: monospace;">
+                                ${faltantes.join(', ')}
+                            </div>
+                            <button onclick="mostrarModalCodigo()" class="btn btn-primary" style="margin-top: 1rem;">
+                                ➕ Agregar Código Manual
+                            </button>
+                        </div>
+                    ` : ''}
+                    
+                    <h4 style="margin-bottom: 1rem;">📋 Códigos Detectados (${resultado.codigos.length})</h4>
+                    <div class="codes-grid">
+                        ${resultado.codigos.map((c, i) => `<div class="code-item">${i + 1}. ${c}</div>`).join('')}
+                    </div>
+                    
+                    <div class="action-buttons">
+                        <button onclick="procesarArchivo()" class="btn btn-success btn-large">
+                            ✅ Procesar y Generar PDFs
+                        </button>
+                        <button onclick="cancelarProcesamiento()" class="btn btn-secondary">
+                            ❌ Cancelar
+                        </button>
+                    </div>
+                    
+                    <div id="resultadoProcesamiento" style="margin-top: 1.5rem;"></div>
+                </div>
+            `;
+
+            container.innerHTML = html;
+            container.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function procesarArchivo() {
+            const año = document.getElementById('año').value;
+            const tipo = document.getElementById('tipo').value;
+            const resultadoDiv = document.getElementById('resultadoProcesamiento');
+
+            resultadoDiv.innerHTML = '<div class="alert alert-info"><span class="pulse">⏳ Procesando archivo y generando PDFs individuales...</span></div>';
+
+            try {
+                const response = await fetch('/escaneo/procesar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        archivo: archivoActual,
+                        codigos: codigosActuales,
+                        año: año,
+                        tipo: tipo
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    resultadoDiv.innerHTML = `
+                        <div class="alert alert-success">
+                            <strong>✅ ¡Procesamiento Completado Exitosamente!</strong><br><br>
+                            <div style="display: grid; gap: 0.5rem; margin-top: 1rem;">
+                                <div>📁 <strong>Archivos generados:</strong> ${data.archivos_generados}</div>
+                                <div>📂 <strong>Ruta:</strong> <code>escaneo_separado/${data.ruta_salida}</code></div>
+                                <div>📦 <strong>Original archivado:</strong> <code>${data.archivo_archivado}</code></div>
+                            </div>
+                        </div>
+                    `;
+
+                    setTimeout(() => {
+                        document.getElementById('vistaPrevia').style.display = 'none';
+                        document.getElementById('resultadosDeteccion').style.display = 'none';
+                        mostrarMensaje('✅ Procesamiento completado. Los archivos están listos en escaneo_separado/', 'success');
+                    }, 4000);
+                } else {
+                    resultadoDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${data.error}</div>`;
+                }
+            } catch (error) {
+                resultadoDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        function cancelarProcesamiento() {
+            document.getElementById('vistaPrevia').style.display = 'none';
+            archivoActual = null;
+            codigosActuales = [];
+        }
+
+        function mostrarModalCodigo() {
+            document.getElementById('modalCodigoManual').style.display = 'flex';
+        }
+
+        function cerrarModalCodigo() {
+            document.getElementById('modalCodigoManual').style.display = 'none';
+            document.getElementById('codigoManualInput').value = '';
+            document.getElementById('paginaInicioInput').value = '';
+            document.getElementById('mensajeModalCodigo').innerHTML = '';
+        }
+
+        async function agregarCodigoManual() {
+            const codigo = document.getElementById('codigoManualInput').value.trim();
+            const pagina = document.getElementById('paginaInicioInput').value;
+            const año = document.getElementById('año').value;
+            const tipo = document.getElementById('tipo').value;
+            const mensajeDiv = document.getElementById('mensajeModalCodigo');
+
+            if (!codigo || !pagina) {
+                mensajeDiv.innerHTML = '<div class="alert alert-error">⚠️ Por favor completa todos los campos</div>';
+                return;
+            }
+
+            mensajeDiv.innerHTML = '<div class="alert alert-info"><span class="pulse">⏳ Reprocesando con código adicional...</span></div>';
+
+            try {
+                const response = await fetch('/escaneo/agregar_codigo_manual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        archivo: archivoActual,
+                        codigos_existentes: codigosActuales,
+                        codigo: codigo,
+                        pagina_inicio: parseInt(pagina),
+                        año: año,
+                        tipo: tipo
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    mensajeDiv.innerHTML = '<div class="alert alert-success">✅ ' + data.mensaje + '</div>';
+                    codigosActuales = data.codigos_encontrados;
+
+                    setTimeout(() => {
+                        cerrarModalCodigo();
+                        location.reload();
+                    }, 1500);
+                } else {
+                    mensajeDiv.innerHTML = '<div class="alert alert-error">❌ ' + data.error + '</div>';
+                }
+            } catch (error) {
+                mensajeDiv.innerHTML = '<div class="alert alert-error">❌ Error: ' + error.message + '</div>';
+            }
+        }
+
+        function mostrarMensaje(mensaje, tipo) {
+            const container = document.getElementById('resultadosDeteccion');
+            container.style.display = 'block';
+            container.innerHTML = `<div class="alert alert-${tipo}">${mensaje}</div>`;
+            container.scrollIntoView({ behavior: 'smooth' });
+        }
+    </script>
+</body>
+
+</html>

@@ -12,6 +12,12 @@ UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 PROCESSED_FOLDER = os.path.join(BASE_DIR, 'processed')
 LOG_FOLDER = os.path.join(BASE_DIR, 'logs')
 
+# Rutas para módulo de escaneo
+SCANNED_FOLDER = os.path.join(BASE_DIR, 'scanned')
+SCANNED_ARCHIVE = os.path.join(BASE_DIR, 'scanned_archive')
+ESCANEO_SEPARADO = os.path.join(BASE_DIR, 'escaneo_separado')
+SCANNED_PREVIEW = os.path.join(BASE_DIR, 'scanned_preview')
+
 # Sin límite de tamaño de archivo
 # MAX_CONTENT_LENGTH = None
 

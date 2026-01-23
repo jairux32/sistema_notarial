@@ -17,9 +17,14 @@
                     <h1>📋 Sistema de Procesamiento Notarial</h1>
                     <p>Resolución 202-2021 - Procesador Automático de Protocolos</p>
                 </div>
-                <a href="{{ url_for('logout') }}" class="btn btn-danger">
-                    🚪 Cerrar Sesión
-                </a>
+                <div style="display: flex; gap: 0.5rem;">
+                    <a href="{{ url_for('escaneo_dashboard') }}" class="btn btn-primary">
+                        📄 Módulo de Escaneo
+                    </a>
+                    <a href="{{ url_for('logout') }}" class="btn btn-danger">
+                        🚪 Cerrar Sesión
+                    </a>
+                </div>
             </div>
         </div>
 
@@ -72,9 +77,22 @@
                     </div>
                 </div>
 
+                <!-- Zona de Drag & Drop -->
                 <div class="form-group">
-                    <label for="pdf_file">📄 Archivo PDF a Procesar</label>
-                    <input type="file" name="pdf_file" id="pdf_file" accept=".pdf" required>
+                    <label>📄 Archivo PDF a Procesar</label>
+                    <div id="dropZone" class="drop-zone">
+                        <div class="drop-zone-content">
+                            <div class="drop-zone-icon">📁</div>
+                            <p class="drop-zone-text">Arrastra tu archivo PDF aquí</p>
+                            <p class="drop-zone-subtext">o haz clic para seleccionar</p>
+                            <div id="selectedFile" class="selected-file" style="display: none;">
+                                <span class="file-icon">📄</span>
+                                <span id="fileName"></span>
+                                <button type="button" class="remove-file" onclick="removeFile()">✕</button>
+                            </div>
+                        </div>
+                    </div>
+                    <input type="file" name="pdf_file" id="pdf_file" accept=".pdf" required style="display: none;">
                     <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.5rem;">
                         Sin límite de tamaño • Formato: PDF
                     </p>

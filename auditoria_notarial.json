@@ -106,5 +106,35 @@
     "archivos_generados": 81,
     "codigos_encontrados": 83,
     "errores": null
+  },
+  {
+    "timestamp": "2026-01-23T12:57:34.943951",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
+  },
+  {
+    "timestamp": "2026-01-23T12:58:06.648059",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
+  },
+  {
+    "timestamp": "2026-01-23T12:59:59.095719",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
+  },
+  {
+    "timestamp": "2026-01-23T13:08:53.576821",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
+  },
+  {
+    "timestamp": "2026-01-23T15:44:32.710106",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
   }
 ]

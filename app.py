@@ -12,6 +12,8 @@ from utils.ocr_processor import ProcesadorOCR
 from utils.pdf_splitter import PDFSplitter
 from utils.validator import ValidadorNotarial
 from utils.auditor import Auditoria
+from utils.scanner_monitor import ScannerMonitor
+from utils.batch_processor import BatchProcessor
 
 app = Flask(__name__)
 app.secret_key = 'clave_secreta_notarial_2024'
@@ -379,6 +381,155 @@ def agregar_codigo_manual():
 def download_file(filename):
     return send_file(os.path.join(app.config['PROCESSED_FOLDER'], filename))
 
+# ==================== MÓDULO DE ESCANEO ====================
+
+@app.route('/escaneo')
+@login_required
+def escaneo_dashboard():
+    """Dashboard para módulo de escaneo"""
+    return render_template('escaneo.html', username=current_user.id)
+
+@app.route('/escaneo/detectar_nuevos', methods=['GET'])
+@login_required
+def detectar_nuevos_escaneos():
+    """Detecta archivos nuevos en carpeta scanned/"""
+    try:
+        año = request.args.get('año', datetime.now().year)
+        tipo = request.args.get('tipo', 'A')
+        
+        print(f"\n🔍 Detectando nuevos escaneos...")
+        print(f"   Año: {año}, Tipo: {tipo}")
+        
+        # Crear monitor
+        monitor = ScannerMonitor('scanned/')
+        nuevos = monitor.detectar_archivos_nuevos()
+        
+        if not nuevos:
+            return jsonify({
+                'success': False,
+                'mensaje': 'No hay archivos nuevos en la carpeta scanned/'
+            })
+        
+        print(f"   Archivos detectados: {len(nuevos)}")
+        
+        # Procesar lote
+        processor = BatchProcessor()
+        resultados = processor.procesar_lote(nuevos, año, tipo)
+        
+        # Marcar como procesados
+        for archivo in nuevos:
+            monitor.marcar_como_procesado(archivo)
+        
+        return jsonify({
+            'success': True,
+            'archivos_nuevos': len(nuevos),
+            'resultados': resultados
+        })
+        
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/escaneo/procesar', methods=['POST'])
+@login_required
+def procesar_escaneo():
+    """Procesa archivos escaneados confirmados por usuario"""
+    try:
+        data = request.json
+        archivo = data.get('archivo')
+        codigos = data.get('codigos')
+        año = data.get('año')
+        tipo = data.get('tipo')
+        
+        print(f"\n📄 Procesando escaneo...")
+        print(f"   Archivo: {archivo}")
+        print(f"   Códigos: {len(codigos)}")
+        
+        # Procesar
+        processor = BatchProcessor()
+        archivos_generados = processor.dividir_y_guardar(
+            archivo, codigos, año, tipo, 'escaneo_separado/'
+        )
+        
+        # Archivar original
+        monitor = ScannerMonitor()
+        archivo_archivado = monitor.archivar_archivo(archivo)
+        
+        # Validación
+        validator = ValidadorNotarial()
+        validacion = validator.validar_secuenciales(codigos)
+        
+        # Registrar en auditoría
+        Auditoria.registrar_procesamiento(
+            usuario=current_user.id,
+            archivo=os.path.basename(archivo),
+            año=año,
+            tipo=tipo,
+            resultado=f"Escaneo procesado: {len(archivos_generados)} archivos generados"
+        )
+        
+        return jsonify({
+            'success': True,
+            'archivos_generados': len(archivos_generados),
+            'validacion': validacion,
+            'archivo_archivado': archivo_archivado,
+            'ruta_salida': f"{año}/{MAPEO_TIPOS[tipo]}/"
+        })
+        
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/escaneo/agregar_codigo_manual', methods=['POST'])
+@login_required
+def agregar_codigo_escaneo():
+    """Agrega código manual a escaneo y reprocesa"""
+    try:
+        data = request.json
+        archivo = data.get('archivo')
+        codigos_existentes = data.get('codigos_existentes', [])
+        codigo_manual = data.get('codigo')
+        pagina_inicio = int(data.get('pagina_inicio', 0))
+        año = data.get('año')
+        tipo = data.get('tipo')
+        
+        print(f"\n🔧 Agregando código manual a escaneo...")
+        print(f"   Código: {codigo_manual}")
+        print(f"   Página: {pagina_inicio}")
+        
+        # Procesar con código manual
+        processor = BatchProcessor()
+        archivos_generados = processor.dividir_con_codigos_manuales(
+            archivo,
+            codigos_existentes,
+            [(codigo_manual, pagina_inicio)],
+            año, tipo,
+            'escaneo_separado/'
+        )
+        
+        # Validación actualizada
+        todos_codigos = codigos_existentes + [codigo_manual]
+        validator = ValidadorNotarial()
+        validacion = validator.validar_secuenciales(todos_codigos)
+        
+        return jsonify({
+            'success': True,
+            'archivos_generados': len(archivos_generados),
+            'codigos_encontrados': todos_codigos,
+            'validacion': validacion,
+            'mensaje': f'Código {codigo_manual} agregado exitosamente'
+        })
+        
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/logout')
 @login_required
 def logout():
@@ -392,5 +543,14 @@ if __name__ == '__main__':
         for año in range(2014, 2031):
             for tipo in MAPEO_TIPOS.values():
                 os.makedirs(os.path.join(folder, str(año), tipo), exist_ok=True)
+    
+    # Crear directorios para módulo de escaneo
+    for folder in ['scanned', 'scanned_archive', 'escaneo_separado', 'scanned_preview']:
+        os.makedirs(folder, exist_ok=True)
+    
+    # Crear estructura de años y tipos en escaneo_separado
+    for año in range(2014, 2031):
+        for tipo in MAPEO_TIPOS.values():
+            os.makedirs(os.path.join('escaneo_separado', str(año), tipo), exist_ok=True)
     
     app.run(debug=True, port=5000)

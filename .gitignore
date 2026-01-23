@@ -37,6 +37,16 @@ processed/*
 reportes/*
 !reportes/.gitkeep
 
+# Módulo de escaneo
+scanned/*
+!scanned/.gitkeep
+scanned_archive/*
+!scanned_archive/.gitkeep
+escaneo_separado/*
+!escaneo_separado/.gitkeep
+scanned_preview/*
+!scanned_preview/.gitkeep
+
 # Logs
 *.log
 logs/
