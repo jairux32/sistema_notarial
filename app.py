@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime
 from werkzeug.utils import secure_filename
 import logging
+from dotenv import load_dotenv
 
 from utils.ocr_processor import ProcesadorOCR
 from utils.pdf_splitter import PDFSplitter
@@ -14,11 +15,40 @@ from utils.validator import ValidadorNotarial
 from utils.auditor import Auditoria
 from utils.scanner_monitor import ScannerMonitor
 from utils.batch_processor import BatchProcessor
+import requests
+
+# Importar modelos de base de datos
+from models import db, Usuario, Documento, Auditoria as AuditoriaDB
+
+# Cargar variables de entorno
+load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = 'clave_secreta_notarial_2024'
-app.config['UPLOAD_FOLDER'] = 'uploads/'
-app.config['PROCESSED_FOLDER'] = 'processed/'
+
+# Configuración desde variables de entorno
+app.secret_key = os.getenv('SECRET_KEY', 'clave_secreta_notarial_2024')
+
+# Configuración de base de datos
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
+    'DATABASE_URL',
+    'postgresql://notarial_user:changeme123@localhost:5432/sistema_notarial'
+)
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_pre_ping': True,
+    'pool_recycle': 300,
+}
+
+# Configuración de carpetas desde variables de entorno
+app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', 'uploads/')
+app.config['PROCESSED_FOLDER'] = os.getenv('PROCESSED_FOLDER', 'processed/')
+app.config['SCANNED_FOLDER'] = os.getenv('SCANNED_FOLDER', 'scanned/')
+app.config['SCANNED_ARCHIVE_FOLDER'] = os.getenv('SCANNED_ARCHIVE_FOLDER', 'scanned_archive/')
+app.config['SCANNED_PREVIEW_FOLDER'] = os.getenv('SCANNED_PREVIEW_FOLDER', 'scanned_preview/')
+app.config['ESCANEO_SEPARADO_FOLDER'] = os.getenv('ESCANEO_SEPARADO_FOLDER', 'escaneo_separado/')
+
+# Inicializar base de datos
+db.init_app(app)
 
 # Almacenamiento temporal de procesamiento (en producción usar Redis/DB)
 procesamiento_cache = {}
@@ -29,16 +59,22 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# Usuario predeterminado
+# Clase de usuario para Flask-Login (wrapper del modelo Usuario)
 class User(UserMixin):
-    def __init__(self, id):
-        self.id = id
-
-users = {'admin': {'password': 'PabloPunin1970@'}}
+    def __init__(self, usuario_db):
+        self.id = usuario_db.username
+        self.usuario_db = usuario_db
+    
+    def get_id(self):
+        return self.usuario_db.username
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User(user_id) if user_id in users else None
+    """Cargar usuario desde base de datos"""
+    usuario = Usuario.query.filter_by(username=user_id, activo=True).first()
+    if usuario:
+        return User(usuario)
+    return None
 
 # Mapeo tipos de libro
 MAPEO_TIPOS = {
@@ -48,6 +84,100 @@ MAPEO_TIPOS = {
     'O': 'OTROS',
     'A': 'ARRIENDOS'
 }
+
+# ==================== FUNCIONES HELPER ====================
+
+def guardar_documento_procesado(session_id, nombre_archivo, resultado_procesamiento, usuario_actual=None):
+    """
+    Guarda un documento procesado en PostgreSQL
+    
+    Args:
+        session_id: ID único de la sesión
+        nombre_archivo: Nombre del archivo procesado
+        resultado_procesamiento: Dict con resultados del procesamiento
+        usuario_actual: Usuario que procesó el documento (opcional)
+    
+    Returns:
+        Documento: Objeto del documento guardado
+    """
+    try:
+        # Obtener usuario
+        usuario = None
+        if usuario_actual and hasattr(usuario_actual, 'usuario_db'):
+            usuario = usuario_actual.usuario_db
+        
+        # Extraer datos del resultado
+        validacion = resultado_procesamiento.get('validacion', {})
+        
+        # Parsear fecha de escritura si existe
+        fecha_escritura = None
+        if validacion.get('fecha_escritura'):
+            try:
+                fecha_str = validacion['fecha_escritura']
+                # Intentar diferentes formatos
+                for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y']:
+                    try:
+                        fecha_escritura = datetime.strptime(fecha_str, fmt).date()
+                        break
+                    except:
+                        continue
+            except:
+                pass
+        
+        # Crear documento
+        documento = Documento(
+            session_id=session_id,
+            nombre_archivo=nombre_archivo,
+            ruta_archivo=resultado_procesamiento.get('ruta_salida'),
+            usuario=usuario,
+            estado='procesado',
+            tiempo_procesamiento=resultado_procesamiento.get('tiempo_procesamiento'),
+            metodo_ocr=resultado_procesamiento.get('metodo_ocr', 'hybrid'),
+            
+            # Datos extraídos
+            numero_escritura=validacion.get('numero_escritura'),
+            fecha_escritura=fecha_escritura,
+            tipo_acto=validacion.get('tipo_acto'),
+            otorgantes=validacion.get('otorgantes'),
+            identificaciones=validacion.get('identificaciones'),
+            cuantia=validacion.get('cuantia'),
+            
+            # Metadatos
+            total_paginas=resultado_procesamiento.get('total_paginas'),
+            confianza_promedio=validacion.get('confianza_promedio'),
+            requiere_revision=len(resultado_procesamiento.get('codigos_faltantes', [])) > 0
+        )
+        
+        db.session.add(documento)
+        
+        # Registrar en auditoría
+        if usuario:
+            auditoria = AuditoriaDB(
+                documento=documento,
+                usuario=usuario,
+                accion='procesamiento',
+                detalles={
+                    'archivos_generados': resultado_procesamiento.get('archivos_generados'),
+                    'codigos_encontrados': len(resultado_procesamiento.get('codigos_encontrados', [])),
+                    'codigos_faltantes': len(resultado_procesamiento.get('codigos_faltantes', [])),
+                    'success': resultado_procesamiento.get('success', False)
+                },
+                ip_address=request.remote_addr if request else None,
+                user_agent=request.headers.get('User-Agent') if request else None
+            )
+            db.session.add(auditoria)
+        
+        db.session.commit()
+        
+        return documento
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"❌ Error guardando documento en BD: {str(e)}")
+        raise
+
+# ==================== RUTAS ====================
+
 
 @app.route('/')
 def index():
@@ -59,12 +189,29 @@ def login():
         username = request.form['username']
         password = request.form['password']
         
-        if username in users and users[username]['password'] == password:
-            user = User(username)
+        # Buscar usuario en base de datos
+        usuario = Usuario.query.filter_by(username=username, activo=True).first()
+        
+        if usuario and usuario.check_password(password):
+            # Actualizar último acceso
+            usuario.ultimo_acceso = datetime.utcnow()
+            db.session.commit()
+            
+            # Login exitoso
+            user = User(usuario)
             login_user(user)
             
-            # Registrar acceso
-            Auditoria.registrar_acceso(username)
+            # Registrar acceso en auditoría
+            auditoria = AuditoriaDB(
+                usuario=usuario,
+                accion='login',
+                detalles={'ip': request.remote_addr},
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get('User-Agent')
+            )
+            db.session.add(auditoria)
+            db.session.commit()
+            
             return redirect(url_for('dashboard'))
         else:
             flash('Usuario o contraseña incorrectos. Verifica tus credenciales.', 'error')
@@ -99,14 +246,18 @@ def upload_file():
         # Procesar el archivo
         resultado = procesar_pdf(filepath, año, tipo_libro)
         
-        # Registrar en auditoría
-        Auditoria.registrar_procesamiento(
-            usuario=current_user.id,
-            archivo=filename,
-            año=año,
-            tipo=tipo_libro,
-            resultado=resultado
-        )
+        # Guardar en base de datos PostgreSQL
+        if resultado.get('success'):
+            try:
+                session_id = resultado.get('session_id')
+                guardar_documento_procesado(
+                    session_id=session_id,
+                    nombre_archivo=filename,
+                    resultado_procesamiento=resultado,
+                    usuario_actual=current_user
+                )
+            except Exception as e:
+                print(f"⚠️ Error guardando en BD (continuando): {str(e)}")
         
         return jsonify(resultado)
     
@@ -525,10 +676,341 @@ def agregar_codigo_escaneo():
         })
         
     except Exception as e:
+        print(f"❌ Error: {str(e)}\")")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+# ==================== CONTROL DE ESCÁNER DIRECTO ====================
+
+@app.route('/escaneo/check_service', methods=['GET'])
+@login_required
+def check_scanner_service():
+    """Verifica si el servicio de escaneo está corriendo"""
+    try:
+        response = requests.get('http://localhost:5001/status', timeout=2)
+        if response.status_code == 200:
+            data = response.json()
+            return jsonify({
+                'available': True,
+                'data': data
+            })
+    except requests.exceptions.ConnectionError:
+        pass
+    except Exception as e:
+        print(f"Error verificando servicio: {e}")
+    
+    return jsonify({'available': False})
+
+@app.route('/escaneo/scan_request', methods=['POST'])
+@login_required
+def solicitar_escaneo():
+    """Solicita escaneo al servicio local"""
+    try:
+        data = request.json
+        resolution = int(data.get('resolution', 300))
+        mode = data.get('mode', 'Color')
+        
+        print(f"\n🖨️  Solicitando escaneo: {resolution}dpi, {mode}")
+        
+        # Llamar al servicio local
+        response = requests.post(
+            'http://localhost:5001/scan',
+            json={
+                'resolution': resolution,
+                'mode': mode,
+                'output_dir': 'scanned'
+            },
+            timeout=60  # 60 segundos para escanear
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"✅ Escaneo exitoso: {result.get('archivo')}")
+            return jsonify(result)
+        else:
+            error_data = response.json()
+            return jsonify({
+                'success': False,
+                'error': error_data.get('error', 'Error desconocido')
+            }), 500
+            
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'success': False,
+            'error': 'Servicio de escaneo no disponible. Por favor inicia scanner_service.py'
+        }), 503
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'success': False,
+            'error': 'Timeout: El escaneo tardó demasiado. Verifica el escáner.'
+        }), 504
+    except Exception as e:
         print(f"❌ Error: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+@app.route('/escaneo/scan_with_ocr', methods=['POST'])
+@login_required
+def scan_with_ocr():
+    """Escanea documento y ejecuta OCR inmediatamente"""
+    try:
+        data = request.json
+        resolution = int(data.get('resolution', 300))
+        mode = data.get('mode', 'Color')
+        año = data.get('año')
+        tipo = data.get('tipo')
+        
+        print(f"\n🖨️  Solicitando escaneo con OCR: {resolution}dpi, {mode}, {año}-{tipo}")
+        
+        # Llamar al servicio local con OCR
+        response = requests.post(
+            'http://localhost:5001/scan_with_ocr',
+            json={
+                'resolution': resolution,
+                'mode': mode,
+                'output_dir': 'scanned',
+                'año': año,
+                'tipo': tipo
+            },
+            timeout=90  # 90 segundos para escanear + OCR
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"✅ Escaneo + OCR exitoso: {result.get('total_codigos', 0)} códigos")
+            return jsonify(result)
+        else:
+            error_data = response.json()
+            return jsonify({
+                'success': False,
+                'error': error_data.get('error', 'Error desconocido')
+            }), 500
+            
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'success': False,
+            'error': 'Servicio de escaneo no disponible. Por favor inicia scanner_service.py'
+        }), 503
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'success': False,
+            'error': 'Timeout: El escaneo + OCR tardó demasiado. Verifica el escáner.'
+        }), 504
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/escaneo/scan_multiple', methods=['POST'])
+@login_required
+def scan_multiple_pages():
+    """Escanea múltiples páginas con ADF"""
+    try:
+        data = request.json
+        resolution = int(data.get('resolution', 300))
+        mode = data.get('mode', 'Color')
+        duplex = data.get('duplex', False)
+        max_pages = int(data.get('max_pages', 100))
+        
+        print(f"\n🖨️  Solicitando escaneo multipágina: {resolution}dpi, {mode}, duplex={duplex}, max={max_pages}")
+        
+        # Llamar al servicio local
+        response = requests.post(
+            'http://localhost:5001/scan_multiple',
+            json={
+                'resolution': resolution,
+                'mode': mode,
+                'duplex': duplex,
+                'max_pages': max_pages,
+                'output_dir': 'scanned'
+            },
+            timeout=120  # 2 minutos para múltiples páginas
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"✅ Escaneo multipágina exitoso: {result.get('num_paginas', 0)} páginas")
+            return jsonify(result)
+        else:
+            error_data = response.json()
+            return jsonify({
+                'success': False,
+                'error': error_data.get('error', 'Error desconocido')
+            }), 500
+            
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'success': False,
+            'error': 'Servicio de escaneo no disponible. Por favor inicia scanner_service.py'
+        }), 503
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'success': False,
+            'error': 'Timeout: El escaneo multipágina tardó demasiado.'
+        }), 504
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/escaneo/scan_multiple_with_ocr', methods=['POST'])
+@login_required
+def scan_multiple_pages_with_ocr():
+    """Escanea múltiples páginas con ADF y ejecuta OCR"""
+    try:
+        data = request.json
+        resolution = int(data.get('resolution', 300))
+        mode = data.get('mode', 'Color')
+        duplex = data.get('duplex', False)
+        max_pages = int(data.get('max_pages', 100))
+        año = data.get('año')
+        tipo = data.get('tipo')
+        
+        print(f"\n🖨️  Solicitando escaneo multipágina + OCR: {resolution}dpi, {mode}, duplex={duplex}, max={max_pages}")
+        
+        # Llamar al servicio local
+        response = requests.post(
+            'http://localhost:5001/scan_multiple_with_ocr',
+            json={
+                'resolution': resolution,
+                'mode': mode,
+                'duplex': duplex,
+                'max_pages': max_pages,
+                'output_dir': 'scanned',
+                'año': año,
+                'tipo': tipo
+            },
+            timeout=180  # 3 minutos para múltiples páginas + OCR
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"✅ Escaneo multipágina + OCR exitoso: {result.get('num_paginas', 0)} páginas, {result.get('total_codigos', 0)} códigos")
+            return jsonify(result)
+        else:
+            error_data = response.json()
+            return jsonify({
+                'success': False,
+                'error': error_data.get('error', 'Error desconocido')
+            }), 500
+            
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'success': False,
+            'error': 'Servicio de escaneo no disponible. Por favor inicia scanner_service.py'
+        }), 503
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'success': False,
+            'error': 'Timeout: El escaneo multipágina + OCR tardó demasiado.'
+        }), 504
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/escaneo/compress_pdf', methods=['POST'])
+@login_required
+def compress_scanned_pdf():
+    """Comprime un PDF escaneado"""
+    try:
+        data = request.json
+        input_file = data.get('input_file')
+        level = data.get('level', 'medium')
+        
+        print(f"\n📦 Solicitando compresión: {input_file}, nivel={level}")
+        
+        # Llamar al servicio local
+        response = requests.post(
+            'http://localhost:5001/compress_pdf',
+            json={
+                'input_file': input_file,
+                'level': level
+            },
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"✅ Compresión exitosa: {result.get('reduction_percent', 0)}% reducido")
+            return jsonify(result)
+        else:
+            error_data = response.json()
+            return jsonify({
+                'success': False,
+                'error': error_data.get('error', 'Error desconocido')
+            }), 500
+            
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'success': False,
+            'error': 'Servicio de escaneo no disponible. Por favor inicia scanner_service.py'
+        }), 503
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'success': False,
+            'error': 'Timeout: La compresión tardó demasiado.'
+        }), 504
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/escaneo/preview/<filename>')
+@login_required
+def preview_scanned_pdf(filename):
+    """Vista previa de PDF escaneado"""
+    return render_template('pdf_viewer.html', filename=filename)
+
+@app.route('/escaneo/serve_pdf/<filename>')
+@login_required
+def serve_scanned_pdf(filename):
+    """Sirve PDF para vista previa"""
+    from flask import send_file
+    pdf_path = os.path.join('scanned', filename)
+    if os.path.exists(pdf_path):
+        return send_file(pdf_path, mimetype='application/pdf')
+    else:
+        return jsonify({'error': 'Archivo no encontrado'}), 404
+
+@app.route('/escaneo/progress/<task_id>')
+@login_required
+def get_scan_progress(task_id):
+    """Obtiene el progreso de una tarea de escaneo"""
+    from utils.progress_notifier import progress_notifier
+    progress = progress_notifier.get_progress(task_id)
+    
+    if progress:
+        return jsonify(progress)
+    else:
+        return jsonify({'status': 'not_found'}), 404
+
+@app.route('/escaneo/history')
+@login_required
+def get_scan_history():
+    """Obtiene el historial de escaneos"""
+    from utils.scan_history import scan_history
+    
+    recent = scan_history.get_recent(limit=20)
+    stats = scan_history.get_stats()
+    
+    return jsonify({
+        'recent': recent,
+        'stats': stats
+    })
+
+@app.route('/escaneo/stats')
+@login_required
+def get_scan_stats():
+    """Obtiene estadísticas de escaneos"""
+    from utils.scan_history import scan_history
+    return jsonify(scan_history.get_stats())
 
 @app.route('/logout')
 @login_required

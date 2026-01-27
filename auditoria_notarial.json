@@ -136,5 +136,29 @@
     "usuario": "admin",
     "accion": "LOGIN",
     "ip": "127.0.0.1"
+  },
+  {
+    "timestamp": "2026-01-23T17:20:51.089300",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
+  },
+  {
+    "timestamp": "2026-01-23T17:47:34.954985",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
+  },
+  {
+    "timestamp": "2026-01-27T09:48:15.810321",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
+  },
+  {
+    "timestamp": "2026-01-27T09:55:31.020598",
+    "usuario": "admin",
+    "accion": "LOGIN",
+    "ip": "127.0.0.1"
   }
 ]

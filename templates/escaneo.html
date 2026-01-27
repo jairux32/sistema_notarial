@@ -263,6 +263,78 @@
             </div>
         </div>
 
+        <!-- Escaneo Directo -->
+        <div class="card"
+            style="background: linear-gradient(135deg, rgba(34, 197, 94, 0.05) 0%, rgba(16, 185, 129, 0.05) 100%);">
+            <h3 style="margin-bottom: 1rem;">🖨️ Escaneo Directo desde Escáner</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
+                Escanea documentos directamente desde el Kodak S2060w sin guardar archivos manualmente
+            </p>
+
+            <!-- Estado del servicio -->
+            <div id="serviceStatus" class="alert alert-warning" style="margin-bottom: 1.5rem;">
+                <strong>⏳ Verificando servicio...</strong>
+            </div>
+
+            <!-- Configuración de escaneo -->
+            <div class="config-grid" style="margin-bottom: 1.5rem;">
+                <div class="form-group">
+                    <label for="scanResolution">📐 Resolución (DPI)</label>
+                    <select id="scanResolution">
+                        <option value="150">150 DPI (Rápido)</option>
+                        <option value="300" selected>300 DPI (Recomendado)</option>
+                        <option value="600">600 DPI (Alta calidad)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="scanMode">🎨 Modo de Color</label>
+                    <select id="scanMode">
+                        <option value="Color" selected>Color</option>
+                        <option value="Gray">Escala de grises</option>
+                        <option value="Lineart">Blanco y negro</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Opciones avanzadas para multipágina -->
+            <div class="config-grid" style="margin-top: 1rem;">
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="duplexMode" style="margin-right: 0.5rem;">
+                        📄 Escaneo Duplex (ambos lados)
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="maxPages">📚 Máximo de Páginas</label>
+                    <input type="number" id="maxPages" value="100" min="1" max="500" style="width: 100%;">
+                </div>
+            </div>
+
+            <!-- Botón de escaneo -->
+            <button onclick="iniciarEscaneo()" class="btn btn-success btn-large" id="btnScan" disabled
+                style="width: 100%;">
+                🖨️ Escanear Documento
+            </button>
+
+            <div id="scanResult" style="margin-top: 1rem;"></div>
+
+            <!-- Botón de escaneo con OCR -->
+            <button onclick="escanearConOCR()" class="btn btn-primary btn-large" id="btnScanOCR" disabled
+                style="width: 100%; margin-top: 1rem;">
+                🤖 Escanear con OCR Inmediato
+            </button>
+
+            <div id="scanOCRResult" style="margin-top: 1rem;"></div>
+
+            <!-- Botón de escaneo multipágina -->
+            <button onclick="escanearMultipagina()" class="btn btn-warning btn-large" id="btnScanMultiple" disabled
+                style="width: 100%; margin-top: 1rem;">
+                📄 Escanear Múltiples Páginas (ADF)
+            </button>
+
+            <div id="scanMultipleResult" style="margin-top: 1rem;"></div>
+        </div>
+
         <!-- Resultados de detección -->
         <div id="resultadosDeteccion" style="display: none;"></div>
 
@@ -580,6 +652,94 @@
             }
         }
 
+        // ==================== ESCANEO DIRECTO ====================
+        let servicioDisponible = false;
+
+        async function verificarServicio() {
+            const statusDiv = document.getElementById('serviceStatus');
+            const btnScan = document.getElementById('btnScan');
+
+            try {
+                const response = await fetch('/escaneo/check_service');
+                const data = await response.json();
+
+                if (data.available) {
+                    servicioDisponible = true;
+                    statusDiv.className = 'alert alert-success';
+                    statusDiv.innerHTML = `
+                        <strong>✅ Servicio de escaneo activo</strong><br>
+                        Sistema operativo: ${data.data.os}
+                    `;
+                    btnScan.disabled = false;
+                } else {
+                    servicioDisponible = false;
+                    statusDiv.className = 'alert alert-warning';
+                    statusDiv.innerHTML = `
+                        <strong>⚠️ Servicio de escaneo no disponible</strong><br>
+                        Por favor inicia <code>scanner_service.py</code> para habilitar el escaneo directo
+                    `;
+                    btnScan.disabled = true;
+                }
+            } catch (error) {
+                servicioDisponible = false;
+                statusDiv.className = 'alert alert-error';
+                statusDiv.innerHTML = '<strong>❌ Error verificando servicio</strong>';
+                btnScan.disabled = true;
+            }
+        }
+
+        async function iniciarEscaneo() {
+            if (!servicioDisponible) {
+                mostrarMensaje('⚠️ Por favor inicia el servicio de escaneo primero', 'warning');
+                return;
+            }
+
+            const resolution = document.getElementById('scanResolution').value;
+            const mode = document.getElementById('scanMode').value;
+            const btnScan = document.getElementById('btnScan');
+            const resultDiv = document.getElementById('scanResult');
+
+            btnScan.disabled = true;
+            btnScan.innerHTML = '<span class="pulse">🖨️ Escaneando...</span>';
+            resultDiv.innerHTML = '<div class="alert alert-info">⏳ Escaneando documento. Por favor espera...</div>';
+
+            try {
+                const response = await fetch('/escaneo/scan_request', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        resolution: parseInt(resolution),
+                        mode: mode
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <div class="alert alert-success">
+                            <strong>✅ ${data.mensaje}</strong><br>
+                            Archivo guardado: <code>${data.archivo}</code><br><br>
+                            <button onclick="location.reload()" class="btn btn-primary">
+                                🔄 Actualizar y Procesar Documento
+                            </button>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<div class="alert alert-error">❌ ${data.error}</div>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.message}</div>`;
+            } finally {
+                btnScan.disabled = false;
+                btnScan.innerHTML = '🖨️ Escanear Documento';
+            }
+        }
+
+        // Verificar servicio al cargar y cada 10 segundos
+        verificarServicio();
+        setInterval(verificarServicio, 10000);
+
         function mostrarMensaje(mensaje, tipo) {
             const container = document.getElementById('resultadosDeteccion');
             container.style.display = 'block';
@@ -587,6 +747,8 @@
             container.scrollIntoView({ behavior: 'smooth' });
         }
     </script>
+    <script src="{{ url_for('static', filename='scanner_ocr.js') }}"></script>
+    <script src="{{ url_for('static', filename='scanner_multiple.js') }}"></script>
 </body>
 
 </html>

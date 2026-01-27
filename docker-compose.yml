@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  # Base de datos PostgreSQL
+  db:
+    image: postgres:15-alpine
+    container_name: notarial_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sistema_notarial
+      POSTGRES_USER: notarial_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme123}
+    volumes:
+      # Datos de PostgreSQL en disco externo
+      - ${EXTERNAL_DISK_PATH:-/mnt/external}/postgres_data:/var/lib/postgresql/data
+      # Script de inicialización
+      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+    networks:
+      - notarial_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notarial_user -d sistema_notarial"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Aplicación principal
+  app:
+    build: .
+    container_name: notarial_app
+    restart: unless-stopped
+    ports:
+      # Accesible desde red local
+      - "5000:5000"
+    environment:
+      # Configuración de Flask
+      FLASK_ENV: production
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this}
+      
+      # Configuración de base de datos
+      DATABASE_URL: postgresql://notarial_user:${DB_PASSWORD:-changeme123}@db:5432/sistema_notarial
+      
+      # Configuración de rutas (dentro del contenedor)
+      UPLOAD_FOLDER: /data/uploads
+      PROCESSED_FOLDER: /data/processed
+      SCANNED_FOLDER: /data/scanned
+      SCANNED_ARCHIVE_FOLDER: /data/scanned_archive
+      SCANNED_PREVIEW_FOLDER: /data/scanned_preview
+      ESCANEO_SEPARADO_FOLDER: /data/escaneo_separado
+      
+      # Configuración de OCR
+      TESSERACT_CMD: /usr/bin/tesseract
+      
+      # Timezone
+      TZ: America/Bogota
+    
+    volumes:
+      # Todos los datos en disco externo
+      - ${EXTERNAL_DISK_PATH:-/mnt/external}/uploads:/data/uploads
+      - ${EXTERNAL_DISK_PATH:-/mnt/external}/processed:/data/processed
+      - ${EXTERNAL_DISK_PATH:-/mnt/external}/scanned:/data/scanned
+      - ${EXTERNAL_DISK_PATH:-/mnt/external}/scanned_archive:/data/scanned_archive
+      - ${EXTERNAL_DISK_PATH:-/mnt/external}/scanned_preview:/data/scanned_preview
+      - ${EXTERNAL_DISK_PATH:-/mnt/external}/escaneo_separado:/data/escaneo_separado
+      
+      # Logs en disco externo
+      - ${EXTERNAL_DISK_PATH:-/mnt/external}/logs:/app/logs
+      
+      # Configuración local (opcional, para desarrollo)
+      # - ./config.py:/app/config.py:ro
+    
+    devices:
+      # Acceso al escáner (ajustar según tu escáner)
+      # Encuentra el device con: ls -la /dev/bus/usb/
+      - /dev/bus/usb:/dev/bus/usb
+    
+    privileged: false
+    
+    # Permisos para acceder al escáner
+    group_add:
+      - scanner
+    
+    depends_on:
+      db:
+        condition: service_healthy
+    
+    networks:
+      - notarial_network
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  notarial_network:
+    driver: bridge
+
+# Volúmenes nombrados (opcional, si no usas disco externo)
+# volumes:
+#   postgres_data:
+#   app_data:
