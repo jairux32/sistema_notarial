@@ -142,10 +142,10 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="paginaInicio">Página de Inicio (0-indexed)</label>
-                    <input type="number" id="paginaInicio" placeholder="320" min="0">
+                    <label for="paginaInicio">Número de Página en el PDF</label>
+                    <input type="number" id="paginaInicio" placeholder="10" min="1">
                     <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.5rem;">
-                        La primera página del documento es 0
+                        Ejemplo: Si el código está en la página 10 del PDF, ingresa 10.
                     </p>
                 </div>
 
@@ -173,6 +173,77 @@
         const btnLoader = document.getElementById('btnLoader');
 
         let currentSessionId = null;
+
+        // Elementos de la zona de carga
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('pdf_file');
+        const selectedFile = document.getElementById('selectedFile');
+        const fileName = document.getElementById('fileName');
+
+        // Eventos de la zona de carga
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+
+        ['dragleave', 'dragend'].forEach(type => {
+            dropZone.addEventListener(type, () => {
+                dropZone.classList.remove('drag-over');
+            });
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+
+            if (e.dataTransfer.files.length) {
+                fileInput.files = e.dataTransfer.files;
+                handleFileSelect();
+            }
+        });
+
+        fileInput.addEventListener('change', handleFileSelect);
+
+        function handleFileSelect() {
+            if (fileInput.files.length) {
+                const file = fileInput.files[0];
+                if (file.type !== 'application/pdf') {
+                    showAlert('Por favor, selecciona un archivo PDF', 'error');
+                    removeFile();
+                    return;
+                }
+
+                fileName.textContent = file.name;
+                selectedFile.style.display = 'flex';
+
+                // Ocultar placeholders
+                dropZone.querySelector('.drop-zone-icon').style.display = 'none';
+                dropZone.querySelector('.drop-zone-text').style.display = 'none';
+                dropZone.querySelector('.drop-zone-subtext').style.display = 'none';
+
+                // Ajustar estilo
+                dropZone.style.padding = '1.5rem';
+                dropZone.style.borderStyle = 'solid';
+                dropZone.style.borderColor = 'var(--primary)';
+            }
+        }
+
+        function removeFile() {
+            fileInput.value = '';
+            selectedFile.style.display = 'none';
+
+            // Mostrar placeholders
+            dropZone.querySelector('.drop-zone-icon').style.display = 'block';
+            dropZone.querySelector('.drop-zone-text').style.display = 'block';
+            dropZone.querySelector('.drop-zone-subtext').style.display = 'block';
+
+            // Restaurar estilo
+            dropZone.style.padding = '3rem 2rem';
+            dropZone.style.borderStyle = 'dashed';
+            dropZone.style.borderColor = 'var(--border-color)';
+        }
 
         form.addEventListener('submit', async function (e) {
             e.preventDefault();
@@ -408,7 +479,7 @@
                     body: JSON.stringify({
                         session_id: currentSessionId,
                         codigo: codigo,
-                        pagina_inicio: parseInt(pagina)
+                        pagina_inicio: parseInt(pagina) - 1 // Convertir de 1-indexed a 0-indexed para el servidor
                     })
                 });
 

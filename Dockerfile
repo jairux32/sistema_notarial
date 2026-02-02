@@ -20,7 +20,6 @@ RUN apt-get update && apt-get install -y \
     # Poppler para PDF
     poppler-utils \
     # SANE para escáner
-    sane \
     sane-utils \
     libsane-dev \
     # Herramientas de imagen
