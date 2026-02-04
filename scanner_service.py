@@ -786,4 +786,4 @@ if __name__ == '__main__':
     print("✅ Servicio iniciado. Presiona Ctrl+C para detener.")
     print()
     
-    app.run(host='localhost', port=5001, debug=False)
+    app.run(host='0.0.0.0', port=5001, debug=False)

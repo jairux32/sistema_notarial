@@ -63,11 +63,40 @@ RUN mkdir -p \
 USER notarial
 
 # Exponer puerto
-EXPOSE 5000
+# ========== CONFIGURACIÓN DE ESCÁNER (RED) ==========
+USER root
+
+# 1. Instalar SANE y utilidades
+RUN apt-get update && apt-get install -y \
+    sane-utils \
+    libsane1 \
+    libsane-common \
+    iputils-ping \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Copiar drivers Kodak desde la carpeta local
+COPY drivers/libsane-kds_s2000w.so.1.0.24 /usr/lib/x86_64-linux-gnu/sane/
+RUN ln -s /usr/lib/x86_64-linux-gnu/sane/libsane-kds_s2000w.so.1.0.24 /usr/lib/x86_64-linux-gnu/sane/libsane-kds_s2000w.so.1 && \
+    ln -s /usr/lib/x86_64-linux-gnu/sane/libsane-kds_s2000w.so.1 /usr/lib/x86_64-linux-gnu/sane/libsane-kds_s2000w.so
+
+# 3. Copiar archivo de configuración
+COPY drivers/kds_s2000w.conf /etc/sane.d/
+
+# 4. Registrar driver en SANE
+RUN echo "kds_s2000w" >> /etc/sane.d/dll.conf
+
+# Permitir que el usuario 'notarial' edite la configuración (para IP dinámica)
+RUN chown notarial:notarial /etc/sane.d/kds_s2000w.conf && chmod 644 /etc/sane.d/kds_s2000w.conf
+
+# Volver a usuario no privilegiado
+USER notarial
+
+# 5. Exponer puertos (El 5001 será interno ahora, pero lo dejamos por si acaso)
+EXPOSE 5000 5001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:5000/ || exit 1
 
 # Comando de inicio
-CMD ["python", "app.py"]
+CMD ["./start.sh"]

@@ -124,6 +124,57 @@
         <!-- Resultados -->
         <div id="resultContainer" style="display: none;"></div>
 
+        <!-- Historial de Procesamiento -->
+        <div class="card" style="margin-top: 2rem;">
+            <h3>🕑 Historial Reciente</h3>
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
+                    <thead>
+                        <tr style="text-align: left; border-bottom: 2px solid var(--border-color);">
+                            <th style="padding: 0.75rem;">Fecha</th>
+                            <th style="padding: 0.75rem;">Archivo</th>
+                            <th style="padding: 0.75rem;">Estado</th>
+                            <th style="padding: 0.75rem;">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if documentos %}
+                        {% for doc in documentos %}
+                        <tr style="border-bottom: 1px solid var(--border-color);">
+                            <td style="padding: 0.75rem; font-size: 0.9rem;">
+                                {{ doc.fecha_procesamiento.strftime('%Y-%m-%d %H:%M') }}
+                            </td>
+                            <td style="padding: 0.75rem;">{{ doc.nombre_archivo }}</td>
+                            <td style="padding: 0.75rem;">
+                                <span
+                                    style="background: rgba(34, 197, 94, 0.1); color: #22c55e; padding: 2px 8px; border-radius: 12px; font-size: 0.85rem;">
+                                    {{ doc.estado }}
+                                </span>
+                            </td>
+                            <td style="padding: 0.75rem;">
+                                {% if doc.notas %}
+                                <a href="{{ url_for('download_file', filename=doc.notas) }}" target="_blank"
+                                    style="text-decoration: none; color: var(--primary); font-weight: bold;">
+                                    📥 Descargar
+                                </a>
+                                {% else %}
+                                <span style="color: var(--text-muted); font-size: 0.85rem;">Procesando...</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% else %}
+                        <tr>
+                            <td colspan="4" style="text-align: center; padding: 2rem; color: var(--text-secondary);">
+                                No hay documentos procesados aún.
+                            </td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- Modal para agregar código manual -->
         <div id="modalAgregarCodigo"
             style="display: none; position: fixed; top: 0; left: 0; 

@@ -1,46 +1,30 @@
 #!/bin/bash
 
-# Script para iniciar el Sistema Notarial
+# Script de inicio para el contenedor Docker
+# Inicia tanto el servicio de escaneo como la aplicación principal
 
-echo "Iniciando Sistema Notarial..."
-echo "Resolución 202-2021 - Consejo de la Judicatura"
-echo ""
+echo "=========================================="
+echo "🚀 INICIANDO SISTEMA NOTARIAL (DOCKER)"
+echo "=========================================="
 
-# Verificar si el entorno virtual existe
-if [ ! -d "venv" ]; then
-    echo "ERROR: No se encontró el entorno virtual."
-    echo "Ejecuta primero: ./setup.sh"
-    exit 1
+# 0. Configurar IP del escáner si existe la variable
+if [ -n "$SCANNER_IP_ADDRESS" ]; then
+    echo "🌐 Configurando escáner de red en: $SCANNER_IP_ADDRESS"
+    # Asegurar que el directorio existe
+    mkdir -p /etc/sane.d/
+    # Escribir configuración de red para driver Kodak (sin sudo, usuario tiene permisos)
+    echo "net $SCANNER_IP_ADDRESS" > /etc/sane.d/kds_s2000w.conf
 fi
 
-# Activar entorno virtual
-source venv/bin/activate
-
-# Verificar dependencias
-if ! command -v tesseract &> /dev/null; then
-    echo "ERROR: Tesseract no está instalado."
-    echo "Ejecuta: sudo apt install tesseract-ocr tesseract-ocr-spa"
-    exit 1
-fi
-
-# Verificar archivos necesarios
-if [ ! -f "app.py" ]; then
-    echo "ERROR: No se encontró app.py"
-    exit 1
-fi
-
-# Crear directorios necesarios
-mkdir -p uploads processed logs
-mkdir -p processed/2014/{PROTOCOLO,DILIGENCIA,CERTIFICACIONES,OTROS,ARRIENDOS}
-# ... repetir para otros años ...
-
-# Iniciar aplicación
-echo "Iniciando servidor Flask..."
-echo "Accede en: http://localhost:5000"
-echo "Usuario: admin"
-echo "Contraseña: PabloPunin1970@"
+# 1. Iniciar servicio de escaneo en segundo plano (dentro del contenedor)
 echo ""
-echo "Presiona Ctrl+C para detener el servidor"
-echo ""
+echo "🖨️  Iniciando Servicio de Escaneo Local (Puerto 5001)..."
+python scanner_service.py &
+SCANNER_PID=$!
+sleep 2
 
-python app.py
+# 2. Iniciar aplicación principal en primer plano
+echo ""
+echo "🌐 Iniciando Aplicación Principal (Puerto 5000)..."
+# Usamos exec para que tome el PID 1 y reciba señales (como SIGTERM)
+exec python app.py

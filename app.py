@@ -26,7 +26,8 @@ load_dotenv()
 app = Flask(__name__)
 
 # Configuración desde variables de entorno
-app.secret_key = os.getenv('SECRET_KEY', 'clave_secreta_notarial_2024')
+app.secret_key = os.getenv('SECRET_KEY', 'dev_key_123')
+SCANNER_SERVICE_URL = os.getenv('SCANNER_SERVICE_URL', 'http://localhost:5001')
 
 # Configuración de base de datos
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
@@ -145,7 +146,10 @@ def guardar_documento_procesado(session_id, nombre_archivo, resultado_procesamie
             # Metadatos
             total_paginas=resultado_procesamiento.get('total_paginas'),
             confianza_promedio=validacion.get('confianza_promedio'),
-            requiere_revision=len(resultado_procesamiento.get('codigos_faltantes', [])) > 0
+            requiere_revision=len(resultado_procesamiento.get('codigos_faltantes', [])) > 0,
+            
+            # Guardamos el nombre del reporte en notas para poder descargarlo
+            notas=os.path.basename(resultado_procesamiento.get('reporte_path', ''))
         )
         
         db.session.add(documento)
@@ -221,9 +225,15 @@ def login():
 @app.route('/dashboard')
 @login_required
 def dashboard():
+    # Obtener últimos documentos procesados
+    documentos = Documento.query.filter_by(usuario_id=current_user.usuario_db.id)\
+        .order_by(Documento.fecha_procesamiento.desc())\
+        .limit(20).all()
+        
     return render_template('dashboard.html', 
                           años=list(range(2014, 2031)),
-                          tipos=MAPEO_TIPOS.items())
+                          tipos=MAPEO_TIPOS.items(),
+                          documentos=documentos)
 
 @app.route('/upload', methods=['POST'])
 @login_required
@@ -687,20 +697,29 @@ def agregar_codigo_escaneo():
 @login_required
 def check_scanner_service():
     """Verifica si el servicio de escaneo está corriendo"""
+    scanner_status = "offline"
+    scanner_os = "Desconocido"
     try:
-        response = requests.get('http://localhost:5001/status', timeout=2)
+        # Verificar estado del servicio de escaneo
+        response = requests.get(f'{SCANNER_SERVICE_URL}/status', timeout=2)
         if response.status_code == 200:
-            data = response.json()
-            return jsonify({
-                'available': True,
-                'data': data
-            })
+            scanner_status = "online"
+            # Intentar obtener info del sistema operativo del escáner
+            try:
+                data = response.json()
+                scanner_os = data.get('os', 'Desconocido')
+            except:
+                scanner_os = "Desconocido"
     except requests.exceptions.ConnectionError:
-        pass
+        scanner_status = "offline"
     except Exception as e:
         print(f"Error verificando servicio: {e}")
     
-    return jsonify({'available': False})
+    return jsonify({
+        'available': scanner_status == "online",
+        'status': scanner_status,
+        'os': scanner_os
+    })
 
 @app.route('/escaneo/scan_request', methods=['POST'])
 @login_required
@@ -715,7 +734,7 @@ def solicitar_escaneo():
         
         # Llamar al servicio local
         response = requests.post(
-            'http://localhost:5001/scan',
+            f'{SCANNER_SERVICE_URL}/scan',
             json={
                 'resolution': resolution,
                 'mode': mode,
@@ -766,7 +785,7 @@ def scan_with_ocr():
         
         # Llamar al servicio local con OCR
         response = requests.post(
-            'http://localhost:5001/scan_with_ocr',
+            f'{SCANNER_SERVICE_URL}/scan_with_ocr',
             json={
                 'resolution': resolution,
                 'mode': mode,
@@ -819,7 +838,7 @@ def scan_multiple_pages():
         
         # Llamar al servicio local
         response = requests.post(
-            'http://localhost:5001/scan_multiple',
+            f'{SCANNER_SERVICE_URL}/scan_multiple',
             json={
                 'resolution': resolution,
                 'mode': mode,
@@ -1017,6 +1036,81 @@ def get_scan_stats():
 def logout():
     logout_user()
     return redirect(url_for('login'))
+
+
+# ==================== API PARA DESKTOP APP ====================
+
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    """Endpoint de login para la app de escritorio"""
+    try:
+        data = request.json
+        username = data.get('username')
+        password = data.get('password')
+        
+        usuario = Usuario.query.filter_by(username=username, activo=True).first()
+        
+        if usuario and usuario.check_password(password):
+            # En producción usar JWT, aquí simulamos retorno seguro
+            return jsonify({
+                'success': True,
+                'user': {
+                    'username': usuario.username,
+                    'role': getattr(usuario, 'rol', 'user')
+                },
+                'token': f"session_{uuid.uuid4()}"  # Token simple por ahora
+            })
+        return jsonify({'success': False, 'error': 'Credenciales inválidas'}), 401
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/upload_scan', methods=['POST'])
+def api_upload_scan():
+    """Recibe PDF procesado desde desktop app"""
+    try:
+        if 'pdf_file' not in request.files:
+            return jsonify({'error': 'No se envió archivo'}), 400
+            
+        file = request.files['pdf_file']
+        # Metadatos vienen en form-data
+        año = request.form.get('año')
+        tipo_libro = request.form.get('tipo_libro')
+        username = request.form.get('username')
+        
+        if not all([año, tipo_libro, username]):
+             return jsonify({'error': 'Faltan metadatos (año, tipo, usuario)'}), 400
+        
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        print(f"\n📥 Recibido desde Desktop App: {filename}")
+        print(f"   Usuario: {username}, Año: {año}, Tipo: {tipo_libro}")
+        
+        # Procesar (Validación/Splitting)
+        resultado = procesar_pdf(filepath, año, tipo_libro)
+        
+        # Asignar usuario
+        usuario_db = Usuario.query.filter_by(username=username).first()
+        user_obj = User(usuario_db) if usuario_db else None
+        
+        if resultado.get('success'):
+             session_id = resultado.get('session_id')
+             guardar_documento_procesado(
+                session_id=session_id,
+                nombre_archivo=filename,
+                resultado_procesamiento=resultado,
+                usuario_actual=user_obj
+            )
+            
+        return jsonify(resultado)
+        
+    except Exception as e:
+        print(f"❌ Error API Upload: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     # Crear directorios necesarios

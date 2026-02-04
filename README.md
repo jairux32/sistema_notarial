@@ -17,43 +17,33 @@ Sistema automatizado para procesamiento de documentos notariales con OCR, valida
 - Python 3.8+
 - Tesseract OCR
 - PyMuPDF (fitz)
-- Flask
-- pytesseract
+## Arquitectura Híbrida (Escáner USB + Backend Docker)
+El sistema utiliza una **App de Escritorio (Python/Flet)** para escanear documentos vía USB y subirlos al servidor web.
 
-## Instalación
+## Instalación y Uso
 
+### 1. Iniciar Servidor (Docker)
+El backend procesa los archivos y gestiona la base de datos.
 ```bash
-# Clonar repositorio
-git clone <url-del-repositorio>
-cd sistema_notarial
-
-# Ejecutar script de configuración
-chmod +x setup.sh
-./setup.sh
-
-# O manualmente:
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+docker-compose up -d
 ```
+Acceder a: http://localhost:5000
 
-## Uso
-
+### 2. Iniciar Escáner (App Escritorio)
+Para escanear documentos (requiere escáner Kodak conectado por USB):
 ```bash
-# Iniciar servidor
-./start.sh
-
-# O manualmente:
-source venv/bin/activate
-python3 app.py
+./run_desktop.sh
 ```
+Esto abrirá la ventana del escáner en `http://localhost:8550`.
 
-Acceder a: http://127.0.0.1:5000
+## Características Clave
+- **Validación Local:** La App de escritorio verifica si el código de barras es legible ANTES de subirlo, ahorrando tiempo.
+- **Searchable PDF:** Los archivos subidos ya van con capa de texto (OCR) generada localmente.
+- **Conexión Directa:** Usa drivers USB KODAK nativos de Linux.
 
-## Credenciales por Defecto
-
+## Credenciales Mensajería
 - **Usuario:** admin
-- **Contraseña:** PabloPunin1970@
+- **Contraseña (Restaurada):** admin123
 
 ## Estructura del Proyecto
 

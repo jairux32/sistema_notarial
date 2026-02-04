@@ -71,7 +71,7 @@ window.verificarServicio = async function () {
             statusDiv.className = 'alert alert-success';
             statusDiv.innerHTML = `
                 <strong>✅ Servicio de escaneo activo</strong><br>
-                Sistema operativo: ${data.data.os}
+                Sistema operativo: ${data.os}
             `;
             btnScan.disabled = false;
             if (btnScanOCR) btnScanOCR.disabled = false;
