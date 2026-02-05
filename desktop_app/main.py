@@ -1,598 +1,486 @@
-import flet as ft
-import requests
-import json
+import customtkinter as ctk
 import os
+import json
+import requests
+import threading
+from PIL import Image, ImageDraw
+import platform
+
+# Configuration
+ctk.set_appearance_mode("System")  # Modes: "System" (standard), "Dark", "Light"
+ctk.set_default_color_theme("blue")  # Themes: "blue" (standard), "green", "dark-blue"
 
 API_URL = "http://localhost:5000/api"
 SESSION_FILE = "session.json"
 
-def main(page: ft.Page):
-    page.title = "Sistema Notarial - Escáner"
-    page.theme_mode = "light"
-    page.vertical_alignment = "center"
-    page.horizontal_alignment = "center"
+class LoginFrame(ctk.CTkFrame):
+    def __init__(self, master, login_callback):
+        super().__init__(master)
+        self.login_callback = login_callback
 
-    # Estado de la sesión
-    user_token = None
-    current_user = None
+        self.place(relx=0.5, rely=0.5, anchor="center")
 
-    def load_session():
-        nonlocal user_token, current_user
+        self.label_title = ctk.CTkLabel(self, text="Sistema Notarial", font=("Roboto", 24, "bold"))
+        self.label_title.pack(pady=20, padx=50)
+
+        self.entry_user = ctk.CTkEntry(self, placeholder_text="Usuario", width=200)
+        self.entry_user.pack(pady=10)
+
+        self.entry_pass = ctk.CTkEntry(self, placeholder_text="Contraseña", show="*", width=200)
+        self.entry_pass.pack(pady=10)
+
+        self.btn_login = ctk.CTkButton(self, text="Iniciar Sesión", command=self.login_event, width=200)
+        self.btn_login.pack(pady=20)
+        
+        self.lbl_status = ctk.CTkLabel(self, text="", text_color="red")
+        self.lbl_status.pack(pady=5)
+
+    def login_event(self):
+        username = self.entry_user.get()
+        password = self.entry_pass.get()
+
+        if not username or not password:
+            self.lbl_status.configure(text="Complete todos los campos", text_color="red")
+            return
+
+        self.btn_login.configure(state="disabled", text="Conectando...")
+        self.lbl_status.configure(text="")
+        
+        # Run in thread to avoid freezing UI
+        threading.Thread(target=self.perform_login, args=(username, password)).start()
+
+    def perform_login(self, username, password):
+        try:
+            response = requests.post(f"{API_URL}/login", json={"username": username, "password": password})
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("success"):
+                    # Success
+                    self.master.after(0, lambda: self.login_callback(data))
+                else:
+                    self.master.after(0, lambda: self.show_error("Credenciales incorrectas"))
+            else:
+                 self.master.after(0, lambda: self.show_error(f"Error servidor: {response.status_code}"))
+        except Exception as e:
+            self.master.after(0, lambda: self.show_error(f"Error conexión: {e}"))
+
+    def show_error(self, message):
+        self.lbl_status.configure(text=message, text_color="red")
+        self.btn_login.configure(state="normal", text="Iniciar Sesión")
+
+
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+
+        self.title("Sistema Notarial - Escáner (v2.0)")
+        self.geometry("1000x700")
+
+        # Session State
+        self.user_token = None
+        self.current_user = None
+
+        # Check existing session
+        if self.load_session():
+            self.show_scanner()
+        else:
+            self.show_login()
+
+    def load_session(self):
         if os.path.exists(SESSION_FILE):
             try:
                 with open(SESSION_FILE, "r") as f:
                     data = json.load(f)
-                    user_token = data.get("token")
-                    current_user = data.get("user")
+                    self.user_token = data.get("token")
+                    self.current_user = data.get("user")
                     return True
             except:
                 return False
         return False
 
-    def save_session(token, user):
+    def save_session(self, token, user):
         with open(SESSION_FILE, "w") as f:
             json.dump({"token": token, "user": user}, f)
+        self.user_token = token
+        self.current_user = user
 
-    # UI Elements
-    username_field = ft.TextField(label="Usuario", width=300)
-    password_field = ft.TextField(label="Contraseña", password=True, can_reveal_password=True, width=300)
-    
-    def login(e):
-        if not username_field.value or not password_field.value:
-            username_field.error_text = "Campo requerido" if not username_field.value else None
-            password_field.error_text = "Campo requerido" if not password_field.value else None
-            page.update()
-            return
+    def show_login(self):
+        # Clear current frame
+        for widget in self.winfo_children():
+            widget.destroy()
 
-        login_button.disabled = True
-        page.update()
+        self.login_frame = LoginFrame(self, self.on_login_success)
 
-        try:
-            print(f"Intentando login en {API_URL}/login...")
-            response = requests.post(
-                f"{API_URL}/login",
-                json={
-                    "username": username_field.value,
-                    "password": password_field.value
-                }
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("success"):
-                    token = data.get("token")
-                    user = data.get("user")
-                    print("Login exitoso")
-                    save_session(token, user)
-                    show_scanner_ui(user)
-                else:
-                    page.snack_bar = ft.SnackBar(ft.Text("Credenciales incorrectas"))
-                    page.snack_bar.open = True
-            else:
-                page.snack_bar = ft.SnackBar(ft.Text(f"Error servidor: {response.status_code}"))
-                page.snack_bar.open = True
-                
-        except Exception as ex:
-            print(f"Error login: {ex}")
-            page.snack_bar = ft.SnackBar(ft.Text(f"Error de conexión: {str(ex)}"))
-            page.snack_bar.open = True
+    def on_login_success(self, data):
+        token = data.get("token")
+        user = data.get("user")
+        self.save_session(token, user)
+        self.show_scanner()
+
+import uuid
+import shutil
+import time
+
+class ScannerFrame(ctk.CTkFrame):
+    def __init__(self, master, logout_callback, user_data):
+        super().__init__(master)
+        self.logout_callback = logout_callback
+        self.user_data = user_data
+        self.session_images = []
+        self.scan_thread = None
+
+        self.pack(fill="both", expand=True)
+
+        # --- Layout ---
+        self.sidebar = ctk.CTkFrame(self, width=250, corner_radius=0)
+        self.sidebar.pack(side="left", fill="y")
         
-        login_button.disabled = False
-        page.update()
+        self.main_area = ctk.CTkFrame(self, corner_radius=0)
+        self.main_area.pack(side="right", fill="both", expand=True)
 
-    login_button = ft.ElevatedButton("Iniciar Sesión", on_click=login, width=300)
+        # --- Sidebar Content ---
+        ctk.CTkLabel(self.sidebar, text="Configuración", font=("Roboto", 18, "bold")).pack(pady=20)
 
-    def logout(e):
-        if os.path.exists(SESSION_FILE):
-            os.remove(SESSION_FILE)
-        show_login_ui()
+        # Device Selection
+        ctk.CTkLabel(self.sidebar, text="Dispositivo:").pack(padx=20, anchor="w")
+        self.device_var = ctk.StringVar(value="Buscando...")
+        self.cb_devices = ctk.CTkComboBox(self.sidebar, variable=self.device_var, width=200)
+        self.cb_devices.pack(padx=20, pady=(0, 10))
+        
+        self.btn_refresh = ctk.CTkButton(self.sidebar, text="🔄 Refrescar", command=self.refresh_scanners, width=200)
+        self.btn_refresh.pack(padx=20, pady=(0, 20))
 
-    def show_login_ui():
-        print("   ➡️ show_login_ui inicio")
-        try:
-            page.clean()
-            page.vertical_alignment = "center"
-            
-            col = ft.Column(
-                [
-                    ft.Text("🖨️", size=64), # Emoji safe replacement for Icon
-                    ft.Text("Sistema Notarial", size=30, weight="bold"),
-                    ft.Text("Módulo de Escaneado", size=16, color="grey"),
-                    ft.Container(height=20),
-                    username_field,
-                    password_field,
-                    ft.Container(height=10),
-                    login_button
-                ],
-                alignment="center",
-                horizontal_alignment="center"
-            )
-            
-            page.add(col)
-            page.update()
-            print("   ✅ Login UI updated")
-        except Exception as ex:
-            print(f"   ❌ ERROR en show_login_ui: {ex}")
-            import traceback
-            traceback.print_exc()
+        # Metadata
+        ctk.CTkLabel(self.sidebar, text="Año:").pack(padx=20, anchor="w")
+        self.entry_year = ctk.CTkEntry(self.sidebar, width=200)
+        self.entry_year.insert(0, "2024")
+        self.entry_year.pack(padx=20, pady=(0, 10))
 
-    # --- Lógica de Escaneo ---
-    selected_device = None
-    
-    # Constante de notaría
-    CODIGO_NOTARIA = "1101007"
+        ctk.CTkLabel(self.sidebar, text="Tipo de Libro:").pack(padx=20, anchor="w")
+        self.cb_type = ctk.CTkComboBox(self.sidebar, values=["Protocolos", "Diligencias", "Certificaciones", "Arriendos", "Otros"], width=200)
+        self.cb_type.set("Protocolos")
+        self.cb_type.pack(padx=20, pady=(0, 20))
 
-    def validate_scan(image_path, year, type_code):
-        """Valida localmente si la imagen tiene el código de barras esperado"""
-        print(f"🔍 Validando OCR local: A={year} T={type_code}")
-        try:
-            import pytesseract
-            from PIL import Image
-            import re
-            
-            # 1. Extraer texto
-            img = Image.open(image_path)
-            text = pytesseract.image_to_string(img)
-            
-            # 2. Limpiar texto
-            correcciones = [('O', '0'), ('o', '0'), ('l', '1'), ('I', '1')]
-            for old, new in correcciones:
-                text = text.replace(old, new)
-                
-            # 3. Validar Regex
-            # Patrón: Año + Notaría + Tipo + 5 dígitos
-            pattern = rf'{year}{CODIGO_NOTARIA}[{type_code}]\d{{5}}'
-            match = re.search(pattern, text)
-            
-            if match:
-                print(f"✅ Código encontrado localmente: {match.group(0)}")
-                return True, match.group(0)
-            else:
-                print(f"⚠️ Código no encontrado. Texto extraído: {text[:50]}...")
-                return False, None
-                
-        except Exception as e:
-            print(f"❌ Error en validación local: {e}")
-            return False, None # Fallar seguro (dejar pasar o advertir)
+        # Actions
+        self.btn_scan = ctk.CTkButton(self.sidebar, text="➕ Escanear Hojas", command=self.start_scan_thread, fg_color="green", width=200)
+        self.btn_scan.pack(padx=20, pady=10)
 
-    def get_connected_scanners():
+        self.btn_process = ctk.CTkButton(self.sidebar, text="🚀 Procesar y Subir", command=self.start_upload, state="disabled", width=200)
+        self.btn_process.pack(padx=20, pady=10)
+
+        ctk.CTkButton(self.sidebar, text="Cerrar Sesión", command=self.logout_callback, fg_color="transparent", border_width=1, text_color=("gray10", "#DCE4EE")).pack(side="bottom", pady=20)
+        
+        # Status
+        self.progress = ctk.CTkProgressBar(self.sidebar, width=200)
+        self.progress.set(0)
+        self.progress.pack(side="bottom", padx=20, pady=10)
+        self.progress.pack_forget() # Hidden initially
+
+        self.lbl_status = ctk.CTkLabel(self.sidebar, text="Listo", wraplength=180)
+        self.lbl_status.pack(side="bottom", padx=20, pady=20)
+
+        # --- Main Area Content (Gallery) ---
+        ctk.CTkLabel(self.main_area, text=f"Galería de Escaneo - Usuario: {user_data.get('username')}", font=("Roboto", 16)).pack(pady=10)
+        
+        self.scrollable_gallery = ctk.CTkScrollableFrame(self.main_area, label_text="Páginas Capturadas")
+        self.scrollable_gallery.pack(fill="both", expand=True, padx=20, pady=20)
+
+        # Initial Load
+        self.refresh_scanners()
+
+    def set_status(self, text, is_error=False, show_progress=False):
+        self.lbl_status.configure(text=text, text_color="red" if is_error else ("black", "white"))
+        if show_progress:
+            self.progress.pack(side="bottom", padx=20, pady=10)
+            self.progress.start()
+        else:
+            self.progress.stop()
+            self.progress.pack_forget()
+
+    def refresh_scanners(self):
+        self.set_status("Buscando escáneres...", show_progress=True)
+        self.cb_devices.configure(state="disabled")
+        threading.Thread(target=self._thread_get_scanners).start()
+
+    def _thread_get_scanners(self):
         devices = []
         try:
+            # NOTE: SANE detection disabled to prevent SEGFAULT on startup without hardware
+            # To re-enable, uncomment the following block:
+            
+            # import sane
+            # try: sane.exit(); except: pass
+            # sane.init()
+            # raw_devices = sane.get_devices()
+            # devices = [f"{d[0]}|{d[1]} {d[2]}" for d in raw_devices]
+            # try: sane.exit(); except: pass
+            
+            print("SANE detection skipped for stability.")
+        except Exception as e:
+            print(f"SANE Error: {e}")
+
+        # Simulation Fallback
+        if not devices:
+            devices.append("simulated_scanner|Escáner Virtual (Simulación)")
+
+        # Update UI in main thread
+        self.after(0, lambda: self._update_devices_ui(devices))
+
+    def _update_devices_ui(self, devices):
+        clean_values = [d.split("|")[1] for d in devices]
+        self.device_ids = {d.split("|")[1]: d.split("|")[0] for d in devices} # Map Name -> ID
+        
+        self.cb_devices.configure(values=clean_values, state="normal")
+        if clean_values:
+            self.cb_devices.set(clean_values[0])
+        
+        self.set_status(f"Encontrados: {len(devices)}")
+
+    def start_scan_thread(self):
+        selected_name = self.cb_devices.get()
+        if not selected_name:
+            self.set_status("Seleccione un dispositivo", True)
+            return
+
+        device_id = self.device_ids.get(selected_name)
+        self.set_status("Escaneando...", show_progress=True)
+        self.btn_scan.configure(state="disabled")
+        
+        threading.Thread(target=self._scan_logic, args=(device_id,)).start()
+
+    def _scan_logic(self, device_id):
+        new_images = []
+        try:
+            # --- SIMULATION MODE ---
+            if "simulated_scanner" in device_id:
+                time.sleep(0.5) # Fake init
+                for i in range(3):
+                    time.sleep(0.5) # Fake scan time
+                    img = Image.new('RGB', (800, 1100), color='white')
+                    d = ImageDraw.Draw(img)
+                    
+                    # Draw text to simulate a real document
+                    d.text((50, 50), f"Documento Simulado Página {i+1}", fill='black')
+                    d.text((50, 80), f"ID Único: {uuid.uuid4()}", fill='black')
+                    
+                    # VALID CODE FOR BACKEND: Year + Notaria + Type + 5 Digits
+                    # Default: 2024 + 1101007 + P + 12345
+                    valid_code = f"{self.entry_year.get()}1101007{self.cb_type.get()[0]}12345" 
+                    d.text((50, 200), f"CODE: {valid_code}", fill='black')
+                    
+                    fname = f"scan_{uuid.uuid4().hex[:8]}.png"
+                    img.save(fname)
+                    new_images.append(fname)
+                    self.after(0, lambda m=f"Simulando pág {i+1}...": self.lbl_status.configure(text=m))
+                
+                self.after(0, lambda: self._on_scan_complete(new_images, "Simulación completada"))
+                return
+            # -----------------------
+
             import sane
-            try:
+            try: 
                 sane.exit()
-            except:
+            except: 
                 pass
             sane.init()
-            devices = sane.get_devices()
-            try:
-                sane.exit()
-            except:
-                pass
-        except Exception as e:
-            print(f"Error SANE: {e}")
+            dev = sane.open(device_id)
             
-        return devices
+            # Config
+            try: 
+                dev.mode = 'Color'
+                dev.resolution = 300
+            except: 
+                pass
+            
+            # Scan Loop
+            iter = dev.multi_scan()
+            while True:
+                try:
+                    img = next(iter)
+                    fname = f"scan_{uuid.uuid4().hex[:8]}.png"
+                    img.save(fname)
+                    new_images.append(fname)
+                    self.after(0, lambda m=f"Capturada pág {len(new_images)}...": self.lbl_status.configure(text=m))
+                except StopIteration:
+                    break
+            
+            dev.close()
+            self.after(0, lambda: self._on_scan_complete(new_images, "Escaneo finalizado"))
 
-    # --- Upload Logic ---
-    def upload_pdf(user, year, book_type, status_text):
-        if not os.path.exists("scan_preview.png"):
-             status_text.value = "⚠️ No hay imagen escaneada"
-             status_text.color = "red"
-             status_text.update()
-             return
+        except Exception as e:
+            self.after(0, lambda: self.set_status(f"Error: {e}", True))
+            self.after(0, lambda: self.btn_scan.configure(state="normal"))
 
-        status_text.value = "⏳ Procesando y subiendo..."
-        status_text.color = "blue"
-        status_text.update()
+    def _on_scan_complete(self, new_paths, msg):
+        self.session_images.extend(new_paths)
+        self.refresh_gallery()
+        self.set_status(msg)
+        self.btn_scan.configure(state="normal")
+        if self.session_images:
+            self.btn_process.configure(state="normal")
 
+    def refresh_gallery(self):
+        # Clear existing
+        for w in self.scrollable_gallery.winfo_children():
+            w.destroy()
+
+        # Re-draw
+        for i, img_path in enumerate(self.session_images):
+            # Frame for each image
+            fr = ctk.CTkFrame(self.scrollable_gallery)
+            fr.pack(pady=5, padx=5, fill="x")
+            
+            # Thumbnail
+            try:
+                pil_img = Image.open(img_path)
+                ctk_img = ctk.CTkImage(light_image=pil_img, size=(100, 130))
+                lbl_img = ctk.CTkLabel(fr, image=ctk_img, text="")
+                lbl_img.pack(side="left", padx=10, pady=5)
+            except: pass
+
+            # Info
+            ctk.CTkLabel(fr, text=f"Página {i+1}", font=("Roboto", 14, "bold")).pack(side="left", padx=10)
+            
+            # Delete Button
+            cmd = lambda idx=i: self.delete_image(idx)
+            ctk.CTkButton(fr, text="🗑️", width=40, height=40, fg_color="red", command=cmd).pack(side="right", padx=10)
+
+    def delete_image(self, index):
         try:
-            # El PDF ya fue generado en el paso de escaneo
-            if not os.path.exists("scan_temp.pdf"):
-                 # Fallback por si acaso
-                 import pytesseract
-                 pdf_bytes = pytesseract.image_to_pdf_or_hocr("scan_preview.png", extension='pdf', lang='spa')
-                 with open("scan_temp.pdf", "wb") as f:
-                     f.write(pdf_bytes)
+            f = self.session_images[index]
+            if os.path.exists(f): os.remove(f)
+            self.session_images.pop(index)
+            self.refresh_gallery()
+            if not self.session_images:
+                self.btn_process.configure(state="disabled")
+        except Exception as e:
+            print(f"Error deleting: {e}")
 
-            pdf_path = "scan_temp.pdf"
+    def start_upload(self):
+        self.set_status("Generando PDF y subiendo...", show_progress=True)
+        self.btn_process.configure(state="disabled")
+        threading.Thread(target=self._upload_logic).start()
 
-            # 2. Subir a API
+    def _upload_logic(self):
+        try:
+            year = self.entry_year.get()
+            # Map friendly name to code using index logic or a map
+            type_map = {"Protocolos":"P", "Diligencias":"D", "Certificaciones":"C", "Arriendos":"A", "Otros":"O"}
+            book_type = type_map.get(self.cb_type.get(), "P")
+
+            # 1. Generate PDF
+            self.after(0, lambda: self.set_status("Generando PDF...", show_progress=True))
+            
+            import pytesseract
+            import fitz # PyMuPDF
+            
+            doc = fitz.open()
+            for img_path in self.session_images:
+                try:
+                    pdf_bytes = pytesseract.image_to_pdf_or_hocr(img_path, extension='pdf', lang='spa')
+                    with fitz.open("pdf", pdf_bytes) as layer:
+                        doc.insert_pdf(layer)
+                except Exception as e:
+                    print(f"OCR Error on {img_path}: {e}")
+            
+            pdf_path = "scan_temp_ctk.pdf"
+            doc.save(pdf_path)
+            doc.close()
+
+            # 2. Upload to API
+            self.after(0, lambda: self.set_status("Subiendo al servidor...", show_progress=True))
+            
             with open(pdf_path, 'rb') as f:
                 files = {'pdf_file': (f'scan_{year}_{book_type}.pdf', f, 'application/pdf')}
                 data = {
-                    'username': user.get('username'),
+                    'username': self.user_data.get('username'),
                     'año': year,
                     'tipo_libro': book_type
                 }
                 response = requests.post(f"{API_URL}/upload_scan", files=files, data=data)
-            
+
             if response.status_code == 200:
-                res_json = response.json()
-                if res_json.get('success'):
-                    status_text.value = "✅ Subida Exitosa: " + res_json.get('message', 'OK')
-                    status_text.color = "green"
+                res = response.json()
+                if res.get('success'):
+                    self.after(0, lambda: self._on_upload_success(res.get('message', 'OK')))
                 else:
-                     status_text.value = "❌ Error Backend: " + str(res_json.get('error'))
-                     status_text.color = "red"
+                    self.after(0, lambda: self.set_status(f"Error Backend: {res.get('error')}", True))
             else:
-                status_text.value = f"❌ Error HTTP {response.status_code}"
-                status_text.color = "red"
+                self.after(0, lambda: self.set_status(f"Error HTTP {response.status_code}", True))
 
         except Exception as e:
-            status_text.value = f"❌ Error Upload: {str(e)}"
-            status_text.color = "red"
-            print(f"Upload Error: {e}")
+            self.after(0, lambda: self.set_status(f"Error: {e}", True))
+        finally:
+             self.after(0, lambda: self.btn_process.configure(state="normal"))
+
+    def _on_upload_success(self, msg):
+        self.set_status(f"✅ Éxito: {msg}")
+        self.progress.stop()
+        self.progress.pack_forget()
         
-        status_text.update()
+        # Cleanup
+        for f in self.session_images:
+            if os.path.exists(f): os.remove(f)
+        self.session_images.clear()
+        self.refresh_gallery()
+        
+        if os.path.exists("scan_temp_ctk.pdf"): os.remove("scan_temp_ctk.pdf")
 
-    def show_scanner_ui(user):
-        print("   ➡️ show_scanner_ui inicio")
-        try:
-            page.clean()
-            page.vertical_alignment = "start"
 
-            # Estado del UI
-            scan_status = ft.Text("Listo para escanear", color="grey")
-            devices = get_connected_scanners()
-            
-            # Dropdown de dispositivos
-            dd_devices = ft.Dropdown(
-                label="Seleccionar Escáner",
-                options=[ft.dropdown.Option(d[0], f"{d[1]} {d[2]}") for d in devices],
-                width=400,
-            )
-            if devices:
-                dd_devices.value = devices[0][0]
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
 
-            # UI Feedback Elements
-            progress_bar = ft.ProgressBar(width=400, color="blue", bgcolor="#eeeeee", visible=False)
-            
-            dlg_success = ft.AlertDialog(
-                title=ft.Text("✅ Proceso Completado"),
-                content=ft.Text(""),
-                actions=[
-                    ft.TextButton("Aceptar", on_click=lambda e: close_dialog(dlg_success))
-                ],
-            )
+        self.title("Sistema Notarial - Escáner (v2.0 CTK)")
+        self.geometry("1100x700")
 
-            def close_dialog(dlg):
-                dlg.open = False
-                page.update()
+        # Session State
+        self.user_token = None
+        self.current_user = None
 
-            page.dialog = dlg_success # Set default dialog
+        # Check existing session
+        if self.load_session():
+            self.show_scanner()
+        else:
+            self.show_login()
 
-            def show_success(message):
-                dlg_success.content.value = message
-                dlg_success.open = True
-                page.update()
+    def load_session(self):
+        if os.path.exists(SESSION_FILE):
+            try:
+                with open(SESSION_FILE, "r") as f:
+                    data = json.load(f)
+                    self.user_token = data.get("token")
+                    self.current_user = data.get("user")
+                    return True
+            except:
+                return False
+        return False
 
-            def on_scan_click(e):
-                if not dd_devices.value:
-                    scan_status.value = "⚠️ Seleccione un escáner"
-                    scan_status.color = "red"
-                    page.update()
-                    return
+    def save_session(self, token, user):
+        with open(SESSION_FILE, "w") as f:
+            json.dump({"token": token, "user": user}, f)
+        self.user_token = token
+        self.current_user = user
 
-                # Deshabilitar UI
-                scan_status.value = "⏳ Iniciando proceso..."
-                scan_status.color = "blue"
-                progress_bar.visible = True
-                btn_scan.disabled = True
-                page.update()
+    def show_login(self):
+        for widget in self.winfo_children(): widget.destroy()
+        self.login_frame = LoginFrame(self, self.on_login_success)
 
-                def run_scan_process():
-                    try:
-                        import sane
-                        # Forzar reinicio de SANE
-                        try:
-                            sane.exit()
-                        except:
-                            pass
-                        sane.init()
-                        
-                        dev = sane.open(dd_devices.value)
-                        
-                        # Configuración básica
-                        try:
-                            opt = dev.get_options()
-                            try:
-                                dev.duplex = 'both'
-                            except:
-                                pass
+    def on_login_success(self, data):
+        token = data.get("token")
+        user = data.get("user")
+        self.save_session(token, user)
+        self.show_scanner()
 
-                            if 'source' in opt:
-                                if 'ADF Duplex' in opt['source'].constraint:
-                                    dev.source = 'ADF Duplex'
-                                else:
-                                    dev.source = 'ADF'
+    def logout_event(self):
+        if os.path.exists(SESSION_FILE): os.remove(SESSION_FILE)
+        self.user_token = None; self.current_user = None
+        self.show_login()
 
-                            dev.mode = 'Color'
-                            dev.resolution = 300
-                        except:
-                            pass 
-
-                        # Escaneo Multi-página
-                        images = []
-                        try:
-                            print("   🎬 Iniciando multi_scan()...")
-                            scan_status.value = "⏳ Alimentando hojas... (Esto puede tardar)"
-                            page.update()
-                            
-                            iter = dev.multi_scan()
-                            page_count = 0
-                            while True:
-                                try:
-                                    print(f"   📸 Esperando página {page_count + 1}...")
-                                    img = next(iter)
-                                    print(f"   ✅ Página {page_count + 1} capturada.")
-                                    images.append(img)
-                                    page_count += 1
-                                    scan_status.value = f"📄 Escaneando página {page_count}..."
-                                    page.update()
-                                except StopIteration:
-                                    print("   🏁 Fin de documentos (StopIteration).")
-                                    break
-                                except Exception as e_next:
-                                    print(f"   ❌ Error al obtener siguiente página: {e_next}")
-                                    break
-                        except Exception as e:
-                            print(f"   ⚠️ Fallo crítico en multi_scan: {e}")
-                            try:
-                                dev.start()
-                                images.append(dev.snap())
-                            except:
-                                pass
-
-                        dev.close()
-
-                        if not images:
-                            raise Exception("No se obtuvieron imágenes")
-                        
-                        # Guardar Preview (Primera página)
-                        images[0].save("scan_preview.png")
-                        img_preview.src = "scan_preview.png"
-                        img_preview.visible = True
-                        img_preview.update()
-                        
-                        # OCR
-                        try:
-                            import pytesseract
-                            import fitz
-                            
-                            final_pdf = fitz.open()
-
-                            for i, img in enumerate(images):
-                                scan_status.value = f"⚙️ Procesando OCR página {i+1} de {len(images)}..."
-                                page.update()
-                                
-                                fname = f"temp_page_{i}.png"
-                                img.save(fname)
-                                pdf_bytes = pytesseract.image_to_pdf_or_hocr(fname, extension='pdf', lang='spa')
-                                
-                                page_doc = fitz.open("pdf", pdf_bytes)
-                                final_pdf.insert_pdf(page_doc)
-                                page_doc.close()
-                                
-                                try:
-                                    os.remove(fname)
-                                except:
-                                    pass
-
-                            final_pdf.save("scan_temp.pdf")
-                            final_pdf.close()
-                            
-                            scan_status.value = f"✅ Escaneo Finalizado ({len(images)} páginas)."
-                            scan_status.color = "green"
-                            show_success(f"Se han escaneado {len(images)} páginas correctamente.")
-
-                        except Exception as pdf_err:
-                            raise pdf_err
-                        
-                    except Exception as ex:
-                        print(f"Error Scanning: {ex}")
-                        scan_status.value = f"❌ Error: {str(ex)}"
-                        scan_status.color = "red"
-                    
-                    finally:
-                        # Restaurar UI
-                        progress_bar.visible = False
-                        btn_scan.disabled = False
-                        page.update()
-
-                import threading
-                threading.Thread(target=run_scan_process).start()
-
-            img_preview = ft.Image(
-                src="",
-                width=400,
-                height=500,
-                fit="contain",
-                visible=False
-            )
-
-            # Metadata Inputs
-            txt_year = ft.TextField(label="Año", value="2024", width=100)
-            dd_type = ft.Dropdown(
-                label="Tipo de Libro",
-                width=200,
-                options=[
-                    ft.dropdown.Option("P", "Protocolos"),
-                    ft.dropdown.Option("D", "Diligencias"),
-                    ft.dropdown.Option("C", "Certificaciones"),
-                    ft.dropdown.Option("A", "Arriendos"),
-                    ft.dropdown.Option("O", "Otros")
-                ],
-                value="P"
-            )
-            def start_upload_flow(e):
-                # 1. Validar inputs
-                if not os.path.exists("scan_preview.png"):
-                    scan_status.value, scan_status.color = "⚠️ No hay imagen", "red"
-                    scan_status.update()
-                    return
-
-                # Deshabilitar UI
-                scan_status.value = "🔍 Verificando código... (Esto puede tardar)"
-                scan_status.color = "blue"
-                progress_bar.visible = True
-                btn_upload.disabled = True
-                page.update()
-
-                def run_upload_process(force_upload=False):
-                    try:
-                         # Si no es forzado, validar primero
-                        if not force_upload:
-                            print("   🔍 Iniciando validación OCR local...")
-                            is_valid, code = validate_scan("scan_preview.png", txt_year.value, dd_type.value)
-                            
-                            if not is_valid:
-                                print("   ⚠️ Validación falló. Pidiendo confirmación.")
-                                # Restaurar UI para dialogo
-                                progress_bar.visible = False
-                                btn_upload.disabled = False
-                                page.update()
-                                
-                                # Disparar dialogo en hilo principal (necesario para Flet?)
-                                # Flet es thread-safe para actualizaciones simples, pero abrir dialogos mejor hacerlo con cuidado
-                                dlg_confirm.open = True
-                                page.update()
-                                return
-                        
-                        # Si es válido o forzado, subir
-                        print("   🚀 Iniciando carga al servidor...")
-                        scan_status.value = "🚀 Subiendo archivo al servidor... (No cierre la ventana)"
-                        scan_status.color = "blue"
-                        progress_bar.visible = True
-                        page.update()
-                        
-                        upload_pdf(user, txt_year.value, dd_type.value, scan_status)
-                        
-                        # Si upload_pdf termina sin excepción, asumimos éxito (el status se actualiza dentro)
-                        progress_bar.visible = False
-                        btn_upload.disabled = False
-                        show_success("El archivo se ha subido correctamente.")
-                        
-                    except Exception as ex:
-                        print(f"❌ Error en flujo de subida: {ex}")
-                        scan_status.value = f"❌ Error: {str(ex)}"
-                        scan_status.color = "red"
-                        progress_bar.visible = False
-                        btn_upload.disabled = False
-                        page.update()
-
-                import threading
-                threading.Thread(target=run_upload_process).start()
-
-            # Dialogo de confirmación forzada
-            def confirm_upload(e):
-                dlg_confirm.open = False
-                page.update()
-                
-                # Relanzar proceso en modo forzado
-                scan_status.value = "🚀 Iniciando subida forzada..."
-                progress_bar.visible = True
-                btn_upload.disabled = True
-                page.update()
-                
-                def run_force_upload():
-                    try:
-                        scan_status.value = "🚀 Subiendo archivo... (Espere por favor)"
-                        page.update()
-                        upload_pdf(user, txt_year.value, dd_type.value, scan_status)
-                        show_success("Archivo subido (Forzado).")
-                    except Exception as ex:
-                         scan_status.value = f"❌ Error: {str(ex)}"
-                         scan_status.color = "red"
-                    finally:
-                        progress_bar.visible = False
-                        btn_upload.disabled = False
-                        page.update()
-
-                import threading
-                threading.Thread(target=run_force_upload).start()
-
-            def cancel_upload(e):
-                dlg_confirm.open = False
-                scan_status.value, scan_status.color = "❌ Subida cancelada", "red"
-                scan_status.update()
-
-            dlg_confirm = ft.AlertDialog(
-                modal=True,
-                title=ft.Text("⚠️ Código no detectado"),
-                content=ft.Text("No pude leer el código de barras en la imagen.\n¿Quieres subir el archivo de todos modos?"),
-                actions=[
-                    ft.TextButton("Sí, Subir", on_click=confirm_upload),
-                    ft.TextButton("Cancelar", on_click=cancel_upload),
-                ],
-                actions_alignment=ft.MainAxisAlignment.END,
-            )
-            
-            btn_scan = ft.ElevatedButton("Escanear", on_click=on_scan_click)
-            btn_upload = ft.ElevatedButton(
-                "Subir PDF",
-                on_click=start_upload_flow
-            )
-
-            # Panel de Control
-            control_panel = ft.Column([
-                ft.Text("Selección de Dispositivo:", weight="bold"),
-                dd_devices,
-                ft.ElevatedButton("🔄 Refrescar Dispositivos", on_click=lambda e: show_scanner_ui(user)), 
-                ft.Divider(),
-                ft.Text("Metadatos:", weight="bold"),
-                ft.Row([txt_year, dd_type]),
-                ft.Container(height=10),
-                ft.Row([btn_scan, btn_upload]),
-                ft.Container(height=10),
-                progress_bar, # Barra de progreso
-                scan_status
-            ])
-
-            page.add(
-                ft.AppBar(
-                    leading=ft.Text(" 🖨️", size=24), 
-                    leading_width=40,
-                    title=ft.Text("Escáner de Documentos"),
-                    center_title=False,
-                    bgcolor="surface_variant",
-                    actions=[
-                        ft.Text(f"Usuario: {user.get('username')}", size=14, weight="bold"),
-                        ft.TextButton("Salir", on_click=logout)
-                    ]
-                ),
-                ft.Row(
-                    [
-                        control_panel,
-                        ft.Container(
-                            content=img_preview,
-                            border=ft.border.all(1, "grey"),
-                            border_radius=10,
-                            padding=10
-                        )
-                    ],
-                    alignment="center", 
-                    vertical_alignment="start"
-                )
-            )
-            page.update()
-            print("   ✅ Scanner UI updated")
-        except Exception as ex:
-            print(f"   ❌ ERROR en show_scanner_ui: {ex}")
-            import traceback
-            traceback.print_exc()
-
-    print("🚀 Iniciando aplicación...")
-    if load_session():
-        print("✅ Sesión encontrada")
-        show_scanner_ui(current_user)
-    else:
-        print("ℹ️  Mostrando login UI")
-        show_login_ui()
+    def show_scanner(self):
+        for widget in self.winfo_children(): widget.destroy()
+        self.scanner_frame = ScannerFrame(self, self.logout_event, self.current_user)
 
 if __name__ == "__main__":
-    print("🚀 Iniciando servidor Flet en http://localhost:8550")
-    try:
-        ft.app(target=main, view=ft.AppView.WEB_BROWSER, port=8550)
-    except Exception as e:
-        print(f"Error al iniciar: {e}")
+    app = App()
+    app.mainloop()
