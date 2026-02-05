@@ -2,9 +2,12 @@ import customtkinter as ctk
 import os
 import json
 import requests
+import shutil
+import uuid
 import threading
 from PIL import Image, ImageDraw
 import platform
+import time
 
 # Configuration
 ctk.set_appearance_mode("System")  # Modes: "System" (standard), "Dark", "Light"
@@ -117,9 +120,18 @@ class App(ctk.CTk):
         self.save_session(token, user)
         self.show_scanner()
 
-import uuid
-import shutil
-import time
+    def logout_event(self):
+        if os.path.exists(SESSION_FILE): os.remove(SESSION_FILE)
+        self.user_token = None; self.current_user = None
+        self.show_login()
+
+    def show_scanner(self):
+        for widget in self.winfo_children(): widget.destroy()
+        self.scanner_frame = ScannerFrame(self, self.logout_event, self.current_user)
+
+if __name__ == "__main__":
+    app = App()
+    app.mainloop()
 
 class ScannerFrame(ctk.CTkFrame):
     def __init__(self, master, logout_callback, user_data):
@@ -205,19 +217,59 @@ class ScannerFrame(ctk.CTkFrame):
     def _thread_get_scanners(self):
         devices = []
         try:
-            # NOTE: SANE detection disabled to prevent SEGFAULT on startup without hardware
-            # To re-enable, uncomment the following block:
-            
-            # import sane
-            # try: sane.exit(); except: pass
-            # sane.init()
-            # raw_devices = sane.get_devices()
-            # devices = [f"{d[0]}|{d[1]} {d[2]}" for d in raw_devices]
-            # try: sane.exit(); except: pass
-            
-            print("SANE detection skipped for stability.")
-        except Exception as e:
-            print(f"SANE Error: {e}")
+            # Method 1: Try CLI 'scanimage -L' (Safer, no segfault)
+            max_retries = 3
+            result = None
+            for attempt in range(max_retries):
+                try:
+                    import subprocess
+                    cmd = ['scanimage', '-L']
+                    print(f"Executing (Attempt {attempt+1}/{max_retries}): {' '.join(cmd)}")
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                    
+                    print(f"STDOUT: {result.stdout}")
+                    if result.stdout.strip():
+                        # Found something, break retry loop to parse
+                        break
+                    else:
+                        print("Empty stdout from scanimage. Retrying...")
+                        time.sleep(1)
+                except Exception as e:
+                    print(f"Attempt {attempt+1} failed: {e}")
+                    time.sleep(1)
+
+            # Output format: device `kodak_s2000w:libusb:001:005' is a Kodak Alaris s2000w USB scanner
+            if result and result.stdout:
+                for line in result.stdout.splitlines():
+                    if "device" in line:
+                        # Try backtick first (standard SANE)
+                        if "`" in line:
+                            sep = "`"
+                        elif "'" in line: # Some versions/distros might use single quote
+                            sep = "'"
+                        else:
+                            continue 
+                            
+                        parts = line.split(sep)
+                        if len(parts) > 1:
+                            # taking the part after the separator
+                            # e.g. kodak_s2000w:libusb:001:005' is a ...
+                            dev_part = parts[1]
+                            # Now split by single quote to end the ID
+                            dev_str = dev_part.split("'")[0]
+                            
+                            # Clean up name for display
+                            name = dev_str
+                            if "is a" in line:
+                                name = line.split("is a")[1].strip()
+                            
+                            print(f"FOUND DEVICE: ID={dev_str} NAME={name}")
+                            devices.append(f"{dev_str}|{name}")
+                print(f"CLI Scanimage found: {len(devices)} devices")
+        except Exception as cli_e:
+            print(f"CLI Scanimage Error: {cli_e}")
+
+        # Simulation Fallback
 
         # Simulation Fallback
         if not devices:
@@ -277,35 +329,61 @@ class ScannerFrame(ctk.CTkFrame):
                 return
             # -----------------------
 
-            import sane
-            try: 
-                sane.exit()
-            except: 
-                pass
-            sane.init()
-            dev = sane.open(device_id)
+            # Fallback to CLI scanning for stability
+            import subprocess
+            import uuid
             
-            # Config
-            try: 
-                dev.mode = 'Color'
-                dev.resolution = 300
-            except: 
-                pass
+            # Using --batch to scan everything in the ADF
+            # Format: scan_UUID_%04d.png
+            batch_prefix = f"scan_{uuid.uuid4().hex[:8]}_"
+            batch_format = batch_prefix + "%d.png"
             
-            # Scan Loop
-            iter = dev.multi_scan()
-            while True:
-                try:
-                    img = next(iter)
-                    fname = f"scan_{uuid.uuid4().hex[:8]}.png"
-                    img.save(fname)
-                    new_images.append(fname)
-                    self.after(0, lambda m=f"Capturada pág {len(new_images)}...": self.lbl_status.configure(text=m))
-                except StopIteration:
-                    break
+            # Construct command: scanimage -d "DEVICE" --batch="FORMAT" --format=png --source "ADF Duplex" --resolution 300 --mode Color
+            cmd = [
+                'scanimage',
+                '-d', device_id,
+                f'--batch={batch_format}',
+                '--format=png',
+                '--resolution', '300',
+                '--mode', 'Color'
+            ]
             
-            dev.close()
-            self.after(0, lambda: self._on_scan_complete(new_images, "Escaneo finalizado"))
+            print(f"Executing Scan Command: {' '.join(cmd)}")
+            
+            process = subprocess.Popen(
+                cmd, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Wait for completion
+            stdout, stderr = process.communicate()
+            
+            if process.returncode != 0:
+                 # Check if it was just "out of paper" or standard exit
+                 if "scanning" not in stdout and "scanning" not in stderr:
+                     print(f"Scan CLI Error: {stderr}")
+                     # Don't raise immediately, check if files were created (maybe partial scan)
+                     # raise Exception(f"Error escaneando: {stderr[:100]}")
+            
+            print("CLI Scan process finished.")
+            
+            # Find generated files
+            import glob
+            # Scanimage batch numbering starts at 1, usually.
+            generated_files = sorted(glob.glob(f"{batch_prefix}*.png"))
+            
+            if not generated_files:
+                 # If no files, maybe it failed completely
+                 if process.returncode != 0:
+                     raise Exception(f"Fallo el escaneo: {stderr[:100]}")
+                 else:
+                     raise Exception("No se generaron imágenes. ¿Hay papel en el ADF?")
+
+            new_images.extend(generated_files)
+            
+            self.after(0, lambda: self._on_scan_complete(new_images, f"Escaneadas {len(new_images)} páginas"))
 
         except Exception as e:
             self.after(0, lambda: self.set_status(f"Error: {e}", True))
@@ -418,13 +496,28 @@ class ScannerFrame(ctk.CTkFrame):
         self.progress.stop()
         self.progress.pack_forget()
         
-        # Cleanup
+        # Cleanup images
         for f in self.session_images:
             if os.path.exists(f): os.remove(f)
         self.session_images.clear()
         self.refresh_gallery()
         
-        if os.path.exists("scan_temp_ctk.pdf"): os.remove("scan_temp_ctk.pdf")
+        # Move PDF to Output Folder
+        output_dir = os.path.join(os.getcwd(), "scanned_docs")
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+            
+        final_pdf_name = f"scan_{uuid.uuid4().hex[:8]}.pdf"
+        final_pdf_path = os.path.join(output_dir, final_pdf_name)
+        
+        if os.path.exists("scan_temp_ctk.pdf"):
+            shutil.move("scan_temp_ctk.pdf", final_pdf_path)
+            
+        # Open Output Folder
+        try:
+            subprocess.Popen(['xdg-open', output_dir])
+        except Exception as e:
+            print(f"Error opening output folder: {e}")
 
 
 class App(ctk.CTk):

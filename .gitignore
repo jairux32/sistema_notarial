@@ -46,6 +46,7 @@ escaneo_separado/*
 !escaneo_separado/.gitkeep
 scanned_preview/*
 !scanned_preview/.gitkeep
+scanned_docs/
 
 # Logs
 *.log
