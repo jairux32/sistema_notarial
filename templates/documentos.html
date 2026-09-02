@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentos Procesados</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <div class="container fade-in">
+        <div class="header">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                <div>
+                    <h1>📂 Documentos Procesados</h1>
+                    <p>Consulta y descarga documentos individuales separados</p>
+                </div>
+                <div style="display: flex; gap: 0.5rem;">
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-primary">⬅ Volver al Dashboard</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>🔍 Buscar Documentos</h2>
+            <form method="GET" action="{{ url_for('documentos_lista') }}" style="margin-top: 1rem;">
+                <div class="info-grid">
+                    <div class="form-group">
+                        <label for="anio">📅 Año</label>
+                        <select name="anio" id="anio" required>
+                            <option value="">Seleccionar año...</option>
+                            {% for anio in anios_disponibles %}
+                            <option value="{{ anio }}" {{ 'selected' if anio_seleccionado == anio }}>{{ anio }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="tipo">📚 Tipo de Libro</label>
+                        <select name="tipo" id="tipo" required>
+                            <option value="">Seleccionar tipo...</option>
+                            {% for nombre, letra in tipos_map.items() %}
+                            <option value="{{ nombre }}" {{ 'selected' if tipo_seleccionado == nombre }}>{{ nombre }} ({{ letra }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-success" style="margin-top: 1rem;">
+                    🔍 Buscar Documentos
+                </button>
+            </form>
+        </div>
+
+        {% if archivos is not none %}
+        <div class="card" style="margin-top: 1.5rem;">
+            <h2>📋 Resultados: {{ anio_seleccionado }} / {{ tipo_seleccionado }}</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                {{ archivos|length }} documentos encontrados
+            </p>
+
+            {% if archivos %}
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="text-align: left; border-bottom: 2px solid var(--border-color);">
+                            <th style="padding: 0.75rem;">#</th>
+                            <th style="padding: 0.75rem;">Código</th>
+                            <th style="padding: 0.75rem;">Secuencial</th>
+                            <th style="padding: 0.75rem;">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for archivo in archivos %}
+                        <tr style="border-bottom: 1px solid var(--border-color);">
+                            <td style="padding: 0.75rem; color: var(--text-muted);">{{ loop.index }}</td>
+                            <td style="padding: 0.75rem; font-family: monospace; font-weight: bold;">
+                                {{ archivo.replace('.pdf', '') }}
+                            </td>
+                            <td style="padding: 0.75rem;">
+                                {{ archivo.replace('.pdf', '')[-5:] }}
+                            </td>
+                            <td style="padding: 0.75rem;">
+                                <a href="{{ url_for('download_file', filename=archivos_rutas[archivo]) }}"
+                                   class="btn btn-primary"
+                                   style="display: inline-block; text-decoration: none; padding: 0.4rem 0.8rem; font-size: 0.9rem;"
+                                   target="_blank">
+                                    📥 Descargar
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="margin-top: 1.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                {% for archivo in archivos %}
+                <a href="{{ url_for('download_file', filename=archivos_rutas[archivo]) }}"
+                   class="btn btn-secondary"
+                   style="text-decoration: none; padding: 0.3rem 0.6rem; font-size: 0.8rem; font-family: monospace;">
+                    {{ archivo.replace('.pdf', '')[-5:] }}
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p style="text-align: center; padding: 2rem; color: var(--text-secondary);">
+                No se encontraron documentos para esta combinación de año y tipo.
+            </p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</body>
+
+</html>

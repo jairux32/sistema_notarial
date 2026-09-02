@@ -72,66 +72,7 @@ class LoginFrame(ctk.CTkFrame):
         self.btn_login.configure(state="normal", text="Iniciar Sesión")
 
 
-class App(ctk.CTk):
-    def __init__(self):
-        super().__init__()
 
-        self.title("Sistema Notarial - Escáner (v2.0)")
-        self.geometry("1000x700")
-
-        # Session State
-        self.user_token = None
-        self.current_user = None
-
-        # Check existing session
-        if self.load_session():
-            self.show_scanner()
-        else:
-            self.show_login()
-
-    def load_session(self):
-        if os.path.exists(SESSION_FILE):
-            try:
-                with open(SESSION_FILE, "r") as f:
-                    data = json.load(f)
-                    self.user_token = data.get("token")
-                    self.current_user = data.get("user")
-                    return True
-            except:
-                return False
-        return False
-
-    def save_session(self, token, user):
-        with open(SESSION_FILE, "w") as f:
-            json.dump({"token": token, "user": user}, f)
-        self.user_token = token
-        self.current_user = user
-
-    def show_login(self):
-        # Clear current frame
-        for widget in self.winfo_children():
-            widget.destroy()
-
-        self.login_frame = LoginFrame(self, self.on_login_success)
-
-    def on_login_success(self, data):
-        token = data.get("token")
-        user = data.get("user")
-        self.save_session(token, user)
-        self.show_scanner()
-
-    def logout_event(self):
-        if os.path.exists(SESSION_FILE): os.remove(SESSION_FILE)
-        self.user_token = None; self.current_user = None
-        self.show_login()
-
-    def show_scanner(self):
-        for widget in self.winfo_children(): widget.destroy()
-        self.scanner_frame = ScannerFrame(self, self.logout_event, self.current_user)
-
-if __name__ == "__main__":
-    app = App()
-    app.mainloop()
 
 class ScannerFrame(ctk.CTkFrame):
     def __init__(self, master, logout_callback, user_data):
@@ -168,10 +109,20 @@ class ScannerFrame(ctk.CTkFrame):
         self.entry_year.insert(0, "2024")
         self.entry_year.pack(padx=20, pady=(0, 10))
 
+        ctk.CTkLabel(self.sidebar, text="Mes:").pack(padx=20, anchor="w")
+        self.cb_mes = ctk.CTkComboBox(self.sidebar, values=["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"], width=200)
+        self.cb_mes.set("ENERO")
+        self.cb_mes.pack(padx=20, pady=(0, 10))
+
         ctk.CTkLabel(self.sidebar, text="Tipo de Libro:").pack(padx=20, anchor="w")
         self.cb_type = ctk.CTkComboBox(self.sidebar, values=["Protocolos", "Diligencias", "Certificaciones", "Arriendos", "Otros"], width=200)
         self.cb_type.set("Protocolos")
-        self.cb_type.pack(padx=20, pady=(0, 20))
+        self.cb_type.pack(padx=20, pady=(0, 10))
+
+        ctk.CTkLabel(self.sidebar, text="Número de Libro:").pack(padx=20, anchor="w")
+        self.entry_libro_num = ctk.CTkEntry(self.sidebar, width=200)
+        self.entry_libro_num.insert(0, "1")
+        self.entry_libro_num.pack(padx=20, pady=(0, 20))
 
         # Actions
         self.btn_scan = ctk.CTkButton(self.sidebar, text="➕ Escanear Hojas", command=self.start_scan_thread, fg_color="green", width=200)
@@ -442,6 +393,9 @@ class ScannerFrame(ctk.CTkFrame):
     def _upload_logic(self):
         try:
             year = self.entry_year.get()
+            mes = self.cb_mes.get()
+            libro_num = self.entry_libro_num.get()
+            
             # Map friendly name to code using index logic or a map
             type_map = {"Protocolos":"P", "Diligencias":"D", "Certificaciones":"C", "Arriendos":"A", "Otros":"O"}
             book_type = type_map.get(self.cb_type.get(), "P")
@@ -473,9 +427,11 @@ class ScannerFrame(ctk.CTkFrame):
                 data = {
                     'username': self.user_data.get('username'),
                     'año': year,
+                    'mes': mes,
+                    'numero_libro': libro_num,
                     'tipo_libro': book_type
                 }
-                response = requests.post(f"{API_URL}/upload_scan", files=files, data=data)
+                response = requests.post(f"{API_URL}/upload_scan", files=files, data=data, timeout=120)
 
             if response.status_code == 200:
                 res = response.json()

@@ -1,15 +1,16 @@
 import os
+import platform
 
 # Configuración básica
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Configuración de Flask
-SECRET_KEY = 'clave_secreta_notarial_2024_ubuntu'
-DEBUG = True
+SECRET_KEY = os.getenv('SECRET_KEY', 'dev_key_123')
+DEBUG = os.getenv('DEBUG', 'true').lower() == 'true'
 
 # Rutas de archivos
-UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
-PROCESSED_FOLDER = os.path.join(BASE_DIR, 'processed')
+UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', os.path.join(BASE_DIR, 'uploads'))
+PROCESSED_FOLDER = os.getenv('PROCESSED_FOLDER', os.path.join(BASE_DIR, 'processed'))
 LOG_FOLDER = os.path.join(BASE_DIR, 'logs')
 
 # Rutas para módulo de escaneo
@@ -18,14 +19,19 @@ SCANNED_ARCHIVE = os.path.join(BASE_DIR, 'scanned_archive')
 ESCANEO_SEPARADO = os.path.join(BASE_DIR, 'escaneo_separado')
 SCANNED_PREVIEW = os.path.join(BASE_DIR, 'scanned_preview')
 
-# Sin límite de tamaño de archivo
-# MAX_CONTENT_LENGTH = None
+# Configuración Tesseract (multiplataforma)
+if platform.system() == 'Windows':
+    TESSERACT_CMD = os.getenv('TESSERACT_CMD', r'C:\Program Files\Tesseract-OCR\tesseract.exe')
+else:
+    TESSERACT_CMD = os.getenv('TESSERACT_CMD', '/usr/bin/tesseract')
 
-# Configuración Tesseract (Ubuntu)
-TESSERACT_CMD = '/usr/bin/tesseract'
+# Configuración de base de datos (SQLite por defecto en Windows, PostgreSQL en Linux)
+DEFAULT_DB = 'sqlite:///sistema_notarial.db' if platform.system() == 'Windows' else \
+    'postgresql://notarial_user:changeme123@localhost:5432/sistema_notarial'
+DATABASE_URL = os.getenv('DATABASE_URL', DEFAULT_DB)
 
-# Mapeo de tipos de libro
-TIPOS_LIBRO = {
+# Mapeo de tipos de libro (fuente única de verdad)
+MAPEO_TIPOS = {
     'P': 'PROTOCOLO',
     'D': 'DILIGENCIA',
     'C': 'CERTIFICACIONES',
@@ -34,9 +40,5 @@ TIPOS_LIBRO = {
 }
 
 # Configuración de usuario
-USUARIOS = {
-    'admin': {
-        'password': 'PabloPunin1970@',
-        'nombre': 'Administrador Sistema'
-    }
-}
+# Los usuarios se gestionan en la base de datos (models.py - Usuario)
+# USUARIOS migrados a PostgreSQL con hash de contraseñas

@@ -1,0 +1,53 @@
+# Escáner Notarial - Guía Windows
+
+## Requisitos previos
+
+1. **Python 3.10+**: https://www.python.org/downloads/
+   - IMPORTANTE: Marca la casilla "Add Python to PATH" al instalar
+
+2. **Tesseract OCR**: https://github.com/UB-Mannheim/tesseract/wiki
+   - Instalar en la ruta por defecto: `C:\Program Files\Tesseract-OCR\`
+   - Seleccionar el paquete de idioma "Spanish" durante la instalación
+
+## Instalación (una sola vez)
+
+1. Copia la carpeta `sistema_notarial` a tu PC Windows
+2. Haz doble clic en `instalar_windows.bat`
+3. Espera a que termine
+
+## Iniciar el sistema
+
+Haz doble clic en `iniciar_windows.bat`
+
+Se abrirán 2 ventanas:
+- **Servidor Web**: processa los PDFs y maneja la base de datos
+- **Aplicación de Escritorio**: donde escaneas y subes documentos
+
+## Usar la aplicación
+
+1. En la pantalla de login, usa: `admin` / `admin123`
+2. Selecciona tu escáner en el menú desplegable
+3. Haz clic en "Escanear Hojas"
+4. Configura: Año, Mes, Tipo de Libro, Número
+5. Haz clic en "Procesar y Subir"
+
+## Si no tienes escáner conectado
+
+La aplicación usa un "escáner virtual" que genera páginas de prueba.
+
+## Archivos importantes
+
+- `instalar_windows.bat` - Instala todo
+- `iniciar_windows.bat` - Inicia el sistema
+- `app.py` - Servidor web
+- `desktop_app_v2/main.py` - Aplicación de escritorio
+- `processed/` - PDFs procesados se guardan aquí
+- `sistema_notarial.db` - Base de datos SQLite
+
+## Solución de problemas
+
+**Error "Python no encontrado"**: Reinstala Python marcando "Add to PATH"
+
+**Error "Tesseract no encontrado"**: Instala Tesseract en `C:\Program Files\Tesseract-OCR\`
+
+**Error de escáner**: Conecta el escáner por USB antes de abrir la aplicación

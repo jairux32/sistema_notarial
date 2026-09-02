@@ -47,7 +47,7 @@ services:
 
       # Configuración de rutas (dentro del contenedor)
       UPLOAD_FOLDER: /data/uploads
-      PROCESSED_FOLDER: /data/processed
+      PROCESSED_FOLDER: /app/processed
       SCANNED_FOLDER: /data/scanned
       SCANNED_ARCHIVE_FOLDER: /data/scanned_archive
       SCANNED_PREVIEW_FOLDER: /data/scanned_preview
@@ -56,9 +56,6 @@ services:
       # Configuración Tesseract
       TESSDATA_PREFIX: /usr/share/tesseract-ocr/4.00/tessdata
 
-      # URL del servicio de escaneo en el Host
-      # Servicio de escáner corre localmente dentro del contenedor
-      SCANNER_SERVICE_URL: http://localhost:5001
       # IP del escáner en la red
       SCANNER_IP_ADDRESS: 192.168.1.28
 
@@ -68,6 +65,7 @@ services:
     volumes:
       - .:/app
       - ${EXTERNAL_DISK_PATH}:/data
+      - ${HOME}/notarial_docs:/app/processed
       # Mapeo DIRECTO de la carpeta de escaneo local
       # Esto permite que Docker vea los archivos que el Host guarda en ./scanned
       - ./scanned:/data/scanned

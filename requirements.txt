@@ -8,5 +8,8 @@ reportlab==4.0.4
 werkzeug==2.3.7
 flask-cors==4.0.0
 requests==2.31.0
-psycopg2-binary==2.9.9
 python-dotenv==1.0.0
+# PostgreSQL driver (solo necesario si DATABASE_URL usa postgresql)
+psycopg2-binary==2.9.9
+# Windows-only: WIA scanner support
+# pywin32>=306; sys_platform == "win32"

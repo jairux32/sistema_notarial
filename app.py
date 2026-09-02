@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, send_file, jsonify, flash
+from flask import Flask, render_template, request, redirect, url_for, session, send_file, jsonify, flash, abort
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 import os
 import hashlib
@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from utils.ocr_processor import ProcesadorOCR
 from utils.pdf_splitter import PDFSplitter
 from utils.validator import ValidadorNotarial
-from utils.auditor import Auditoria
+from config import MAPEO_TIPOS
 
 import requests
 
@@ -22,22 +22,41 @@ from models import db, Usuario, Documento, Auditoria as AuditoriaDB
 # Cargar variables de entorno
 load_dotenv()
 
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    handlers=[
+        logging.FileHandler('app.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger('sistema_notarial')
+
 app = Flask(__name__)
+
+import platform
 
 # Configuración desde variables de entorno
 app.secret_key = os.getenv('SECRET_KEY', 'dev_key_123')
-SCANNER_SERVICE_URL = os.getenv('SCANNER_SERVICE_URL', 'http://localhost:5001')
 
-# Configuración de base de datos
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
-    'DATABASE_URL',
-    'postgresql://notarial_user:changeme123@localhost:5432/sistema_notarial'
-)
+# Configuración de base de datos (SQLite en Windows, PostgreSQL en Linux/Docker)
+DATABASE_URL = os.getenv('DATABASE_URL')
+if not DATABASE_URL:
+    if platform.system() == 'Windows':
+        DATABASE_URL = 'sqlite:///sistema_notarial.db'
+    else:
+        DATABASE_URL = 'postgresql://notarial_user:changeme123@localhost:5432/sistema_notarial'
+
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_pre_ping': True,
-    'pool_recycle': 300,
-}
+
+# Engine options solo para PostgreSQL
+if DATABASE_URL.startswith('postgresql'):
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_pre_ping': True,
+        'pool_recycle': 300,
+    }
 
 # Configuración de carpetas desde variables de entorno
 app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', 'uploads/')
@@ -76,26 +95,18 @@ def load_user(user_id):
         return User(usuario)
     return None
 
-# Mapeo tipos de libro
-MAPEO_TIPOS = {
-    'P': 'PROTOCOLO',
-    'D': 'DILIGENCIA', 
-    'C': 'CERTIFICACIONES',
-    'O': 'OTROS',
-    'A': 'ARRIENDOS'
-}
-
 # ==================== FUNCIONES HELPER ====================
 
-def guardar_documento_procesado(session_id, nombre_archivo, resultado_procesamiento, usuario_actual=None):
-    """
-    Guarda un documento procesado en PostgreSQL
+def guardar_documento_procesado(session_id, nombre_archivo, resultado_procesamiento, usuario_actual, mes=None, numero_libro=None):
+    """Guarda los metadatos del documento procesado en la BD
     
     Args:
-        session_id: ID único de la sesión
-        nombre_archivo: Nombre del archivo procesado
-        resultado_procesamiento: Dict con resultados del procesamiento
-        usuario_actual: Usuario que procesó el documento (opcional)
+        session_id: ID único de sesión
+        nombre_archivo: Nombre del archivo original
+        resultado_procesamiento: Dict con resultado de procesar_pdf
+        usuario_actual: Usuario (Flask-Login)
+        mes: Mes del libro (nuevo)
+        numero_libro: Número del libro (nuevo)
     
     Returns:
         Documento: Objeto del documento guardado
@@ -133,6 +144,10 @@ def guardar_documento_procesado(session_id, nombre_archivo, resultado_procesamie
             estado='procesado',
             tiempo_procesamiento=resultado_procesamiento.get('tiempo_procesamiento'),
             metodo_ocr=resultado_procesamiento.get('metodo_ocr', 'hybrid'),
+            
+            # Clasificación extendida
+            mes=mes,
+            numero_libro=numero_libro,
             
             # Datos extraídos
             numero_escritura=validacion.get('numero_escritura'),
@@ -176,7 +191,7 @@ def guardar_documento_procesado(session_id, nombre_archivo, resultado_procesamie
         
     except Exception as e:
         db.session.rollback()
-        print(f"❌ Error guardando documento en BD: {str(e)}")
+        logger.error(f"Error guardando documento en BD: {str(e)}")
         raise
 
 # ==================== RUTAS ====================
@@ -241,8 +256,6 @@ def upload_file():
         return jsonify({'error': 'No se seleccionó archivo'}), 400
     
     file = request.files['pdf_file']
-    año = request.form['año']
-    tipo_libro = request.form['tipo_libro']
     
     if file.filename == '':
         return jsonify({'error': 'Nombre de archivo vacío'}), 400
@@ -252,75 +265,84 @@ def upload_file():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        # Procesar el archivo
-        resultado = procesar_pdf(filepath, año, tipo_libro)
+        año = request.form.get('año')
+        mes = request.form.get('mes', 'DESCONOCIDO')
+        tipo = request.form.get('tipo_libro', 'P') # Changed from 'tipo' to 'tipo_libro' to match form
+        numero_libro = request.form.get('numero_libro', 0)
         
-        # Guardar en base de datos PostgreSQL
+        usuario_actual = current_user if current_user.is_authenticated else None
+        
+        # Procesar
+        resultado = procesar_pdf(filepath, año, mes, tipo, numero_libro)
+        
+        # Guardar en base de datos
         if resultado.get('success'):
             try:
                 session_id = resultado.get('session_id')
-                guardar_documento_procesado(
-                    session_id=session_id,
-                    nombre_archivo=filename,
-                    resultado_procesamiento=resultado,
-                    usuario_actual=current_user
-                )
+                if usuario_actual:
+                    guardar_documento_procesado(
+                        session_id=session_id,
+                        nombre_archivo=filename,
+                        resultado_procesamiento=resultado,
+                        usuario_actual=usuario_actual,
+                        mes=mes,
+                        numero_libro=numero_libro
+                    )
             except Exception as e:
-                print(f"⚠️ Error guardando en BD (continuando): {str(e)}")
+                logger.warning(f"Error guardando en BD (continuando): {str(e)}")
         
         return jsonify(resultado)
     
     return jsonify({'error': 'Archivo no válido'}), 400
 
-def procesar_pdf(filepath, año, tipo_libro):
+def procesar_pdf(filepath, año, mes, tipo_libro, numero_libro):
     """Procesa el PDF según la Resolución 202-2021"""
     
-    print("\n" + "="*60)
-    print(f"🚀 INICIANDO PROCESAMIENTO")
-    print("="*60)
-    print(f"📄 Archivo: {filepath}")
-    print(f"📅 Año: {año}")
-    print(f"📚 Tipo: {tipo_libro} ({MAPEO_TIPOS.get(tipo_libro, 'DESCONOCIDO')})")
+    logger.info(f"INICIANDO PROCESAMIENTO - Archivo: {filepath}, Año: {año}, Mes: {mes}, Tipo: {tipo_libro}, Libro: {numero_libro}")
     
     try:
-        # 1. Extraer texto con OCR
-        print("\n📖 PASO 1: Extrayendo texto con OCR...")
+        # 1. Buscar códigos notariales (OCR solo en zona superior del PDF)
+        logger.info("PASO 1: Buscando códigos notariales...")
         processor = ProcesadorOCR()
-        texto_ocr = processor.extraer_texto(filepath)
-        print(f"✅ Texto extraído: {len(texto_ocr)} caracteres")
+        resultado = processor.buscar_codigos_notariales('', año, tipo_libro, pdf_path=filepath)
         
-        # 2. Buscar y corregir códigos
-        print("\n🔍 PASO 2: Buscando códigos notariales...")
-        codigos_encontrados = processor.buscar_codigos_notariales(texto_ocr, año, tipo_libro)
+        if isinstance(resultado, tuple):
+            codigos_encontrados, codigo_a_pagina = resultado
+        else:
+            codigos_encontrados = resultado
+            codigo_a_pagina = {}
         
         if not codigos_encontrados:
-            print("❌ ERROR: No se encontraron códigos válidos")
+            logger.warning("No se encontraron códigos válidos")
             return {'error': 'No se encontraron códigos válidos en el documento'}
         
-        print(f"✅ Códigos encontrados: {len(codigos_encontrados)}")
+        logger.info(f"Códigos encontrados: {len(codigos_encontrados)}")
         
-        # 3. Validar secuenciales
-        print("\n✔️  PASO 3: Validando secuenciales...")
+        # 2. Validar secuenciales
+        logger.info("PASO 2: Validando secuenciales...")
         validador = ValidadorNotarial()
         validacion = validador.validar_secuenciales(codigos_encontrados)
-        print(f"✅ Validación completada")
+        logger.info("Validación completada")
         
-        # 4. Dividir PDF
-        print("\n✂️  PASO 4: Dividiendo PDF...")
+        # 3. Dividir PDF
+        logger.info("PASO 3: Dividiendo PDF...")
         splitter = PDFSplitter()
         archivos_generados = splitter.dividir_por_codigos(
             filepath, 
             codigos_encontrados, 
-            año, 
+            año,
+            mes,
             tipo_libro,
-            app.config['PROCESSED_FOLDER']
+            numero_libro,
+            app.config['PROCESSED_FOLDER'],
+            codigo_a_pagina=codigo_a_pagina
         )
         
         if not archivos_generados:
-            print("⚠️  ADVERTENCIA: No se generaron archivos")
+            logger.warning("No se generaron archivos")
         
-        # 5. Generar reporte PDF
-        print("\n📊 PASO 5: Generando reporte PDF...")
+        # 4. Generar reporte PDF
+        logger.info("PASO 4: Generando reporte PDF...")
         reporte_path = generar_reporte_pdf(
             archivos_generados, 
             validacion, 
@@ -328,16 +350,14 @@ def procesar_pdf(filepath, año, tipo_libro):
             tipo_libro,
             filepath
         )
-        print(f"✅ Reporte generado: {reporte_path}")
+        logger.info(f"Reporte generado: {reporte_path}")
         
-        # 6. Generar hash de integridad
-        print("\n🔐 PASO 6: Calculando hashes de integridad...")
+        # 5. Generar hash de integridad
+        logger.info("PASO 5: Calculando hashes de integridad...")
         hashes = calcular_hashes(archivos_generados)
-        print(f"✅ Hashes calculados: {len(hashes)}")
+        logger.info(f"Hashes calculados: {len(hashes)}")
         
-        print(f"\n" + "="*60)
-        print("✅ PROCESAMIENTO COMPLETADO EXITOSAMENTE")
-        print("="*60)
+        logger.info("PROCESAMIENTO COMPLETADO EXITOSAMENTE")
         
         # Generar session_id único
         session_id = str(uuid.uuid4())
@@ -346,7 +366,9 @@ def procesar_pdf(filepath, año, tipo_libro):
         procesamiento_cache[session_id] = {
             'filepath': filepath,
             'año': año,
+            'mes': mes,
             'tipo_libro': tipo_libro,
+            'numero_libro': numero_libro,
             'codigos_encontrados': codigos_encontrados,
             'archivos_generados': archivos_generados
         }
@@ -358,15 +380,13 @@ def procesar_pdf(filepath, año, tipo_libro):
             'validacion': validacion,
             'hashes': hashes,
             'reporte_path': reporte_path,
-            'ruta_salida': f"{año}/{MAPEO_TIPOS[tipo_libro]}/",
+            'ruta_salida': f"{año}/{MAPEO_TIPOS.get(tipo_libro, 'OTROS')}/",
             'codigos_faltantes': validacion.get('faltantes', []),
             'session_id': session_id
         }
         
     except Exception as e:
-        print(f"\n❌ ERROR EN PROCESAMIENTO: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"ERROR EN PROCESAMIENTO: {str(e)}", exc_info=True)
         return {'error': str(e)}
 
 def generar_reporte_pdf(archivos, validacion, año, tipo, original_path):
@@ -394,7 +414,7 @@ def generar_reporte_pdf(archivos, validacion, año, tipo, original_path):
     y -= 20
     c.drawString(100, y, f"Año configurado: {año}")
     y -= 20
-    c.drawString(100, y, f"Tipo de libro: {MAPEO_TIPOS[tipo]} ({tipo})")
+    c.drawString(100, y, f"Tipo de libro: {MAPEO_TIPOS.get(tipo, 'OTROS')} ({tipo})")
     y -= 20
     c.drawString(100, y, f"Notaría: 1101007")
     y -= 20
@@ -470,10 +490,7 @@ def agregar_codigo_manual():
         codigo_manual = data.get('codigo')
         pagina_inicio = int(data.get('pagina_inicio', 0))
         
-        print(f"\n🔧 AGREGANDO CÓDIGO MANUAL")
-        print(f"Session ID: {session_id}")
-        print(f"Código: {codigo_manual}")
-        print(f"Página: {pagina_inicio}")
+        logger.info(f"AGREGANDO CÓDIGO MANUAL - Session: {session_id}, Código: {codigo_manual}, Página: {pagina_inicio}")
         
         # Validar datos
         if not session_id or session_id not in procesamiento_cache:
@@ -492,7 +509,7 @@ def agregar_codigo_manual():
         # Agregar código manual a la lista
         codigos_actualizados = datos['codigos_encontrados'] + [codigo_manual]
         
-        print(f"📋 Total de códigos: {len(codigos_actualizados)}")
+        logger.info(f"Total de códigos: {len(codigos_actualizados)}")
         
         # Reprocesar división con código adicional
         splitter = PDFSplitter()
@@ -501,7 +518,9 @@ def agregar_codigo_manual():
             codigos_actualizados,
             [(codigo_manual, pagina_inicio)],  # Códigos manuales con páginas
             datos['año'],
+            datos['mes'],
             datos['tipo_libro'],
+            datos['numero_libro'],
             app.config['PROCESSED_FOLDER']
         )
         
@@ -516,8 +535,7 @@ def agregar_codigo_manual():
         # Generar hashes
         hashes = calcular_hashes(archivos_generados)
         
-        print(f"✅ Código agregado exitosamente")
-        print(f"📁 Archivos generados: {len(archivos_generados)}")
+        logger.info(f"Código agregado exitosamente - Archivos generados: {len(archivos_generados)}")
         
         return jsonify({
             'success': True,
@@ -525,21 +543,54 @@ def agregar_codigo_manual():
             'codigos_encontrados': codigos_actualizados,
             'validacion': validacion,
             'hashes': hashes,
-            'ruta_salida': f"{datos['año']}/{MAPEO_TIPOS[datos['tipo_libro']]}/",
+            'ruta_salida': f"{datos['año']}/{MAPEO_TIPOS.get(datos['tipo_libro'], 'OTROS')}/",
             'codigos_faltantes': validacion.get('faltantes', []),
             'mensaje': f'Código {codigo_manual} agregado exitosamente'
         })
         
     except Exception as e:
-        print(f"❌ ERROR: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"ERROR: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+@app.route('/documentos')
+@login_required
+def documentos_lista():
+    processed_folder = app.config['PROCESSED_FOLDER']
+    anio = request.args.get('anio', type=int)
+    tipo = request.args.get('tipo')
+    
+    anios_disponibles = sorted([d for d in os.listdir(processed_folder) 
+                                if os.path.isdir(os.path.join(processed_folder, d)) and d.isdigit()], reverse=True)
+    
+    tipos_map = {'PROTOCOLO': 'P', 'DILIGENCIA': 'D', 'CERTIFICACIONES': 'C', 'OTROS': 'O', 'ARRIENDOS': 'A'}
+    
+    archivos = []
+    archivos_rutas = {}  # archivo -> ruta relativa
+    if anio and tipo:
+        año_dir = os.path.join(processed_folder, str(anio))
+        if os.path.isdir(año_dir):
+            for root, dirs, files in os.walk(año_dir):
+                for f in files:
+                    if f.endswith('.pdf') and tipo in root.upper():
+                        archivos.append(f)
+                        archivos_rutas[f] = os.path.relpath(os.path.join(root, f), processed_folder)
+            archivos = sorted(set(archivos))
+    
+    return render_template('documentos.html',
+                           anios_disponibles=anios_disponibles,
+                           tipos_map=tipos_map,
+                           anio_seleccionado=anio,
+                           tipo_seleccionado=tipo,
+                           archivos=archivos,
+                           archivos_rutas=archivos_rutas)
 
 @app.route('/download/<path:filename>')
 @login_required
 def download_file(filename):
-    return send_file(os.path.join(app.config['PROCESSED_FOLDER'], filename))
+    filepath = os.path.join(app.config['PROCESSED_FOLDER'], filename)
+    if not os.path.exists(filepath):
+        abort(404)
+    return send_file(filepath)
 
 
 
@@ -587,7 +638,9 @@ def api_upload_scan():
         file = request.files['pdf_file']
         # Metadatos vienen en form-data
         año = request.form.get('año')
+        mes = request.form.get('mes', 'DESCONOCIDO')
         tipo_libro = request.form.get('tipo_libro')
+        numero_libro = request.form.get('numero_libro', 0)
         username = request.form.get('username')
         
         if not all([año, tipo_libro, username]):
@@ -597,11 +650,10 @@ def api_upload_scan():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        print(f"\n📥 Recibido desde Desktop App: {filename}")
-        print(f"   Usuario: {username}, Año: {año}, Tipo: {tipo_libro}")
+        logger.info(f"Recibido desde Desktop App: {filename} - Usuario: {username}, Año: {año}, Mes: {mes}, Tipo: {tipo_libro}, Libro: {numero_libro}")
         
         # Procesar (Validación/Splitting)
-        resultado = procesar_pdf(filepath, año, tipo_libro)
+        resultado = procesar_pdf(filepath, año, mes, tipo_libro, numero_libro)
         
         # Asignar usuario
         usuario_db = Usuario.query.filter_by(username=username).first()
@@ -613,15 +665,15 @@ def api_upload_scan():
                 session_id=session_id,
                 nombre_archivo=filename,
                 resultado_procesamiento=resultado,
-                usuario_actual=user_obj
+                usuario_actual=user_obj,
+                mes=mes,
+                numero_libro=numero_libro
             )
             
         return jsonify(resultado)
         
     except Exception as e:
-        print(f"❌ Error API Upload: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error API Upload: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

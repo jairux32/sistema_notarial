@@ -58,6 +58,8 @@ class Documento(db.Model):
     
     # Datos extraídos
     numero_escritura = db.Column(db.String(50))
+    mes = db.Column(db.String(20))          # Nuevo: Mes (ENERO, FEBRERO...)
+    numero_libro = db.Column(db.Integer)    # Nuevo: N° de Libro
     fecha_escritura = db.Column(db.Date)
     tipo_acto = db.Column(db.String(100))
     otorgantes = db.Column(db.Text)
@@ -87,6 +89,8 @@ class Documento(db.Model):
             'tiempo_procesamiento': self.tiempo_procesamiento,
             'metodo_ocr': self.metodo_ocr,
             'numero_escritura': self.numero_escritura,
+            'mes': self.mes,
+            'numero_libro': self.numero_libro,
             'fecha_escritura': self.fecha_escritura.isoformat() if self.fecha_escritura else None,
             'tipo_acto': self.tipo_acto,
             'otorgantes': self.otorgantes,
