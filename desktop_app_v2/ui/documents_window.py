@@ -1,7 +1,6 @@
 """Documents window for listing and downloading processed documents"""
 import os
 import zipfile
-import tempfile
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QComboBox, QTableWidget, QTableWidgetItem,

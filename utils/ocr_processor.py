@@ -1,10 +1,9 @@
 import pytesseract
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image
 import fitz  # PyMuPDF
 import re
 import tempfile
 import os
-import sys
 
 class ProcesadorOCR:
     def __init__(self):

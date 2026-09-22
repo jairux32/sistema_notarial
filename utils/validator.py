@@ -10,7 +10,7 @@ class ValidadorNotarial:
             try:
                 secuencial = int(codigo[-5:])
                 secuenciales.append(secuencial)
-            except:
+            except (ValueError, IndexError):
                 continue
         
         secuenciales.sort()

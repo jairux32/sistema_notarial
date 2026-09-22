@@ -18,8 +18,6 @@ from utils.pdf_splitter import PDFSplitter
 from utils.validator import ValidadorNotarial
 from config import MAPEO_TIPOS, MAPEO_TIPOS_INVERSO
 
-import requests
-
 # Importar modelos de base de datos
 from models import db, Usuario, Documento, Auditoria as AuditoriaDB
 

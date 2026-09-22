@@ -6,7 +6,6 @@ Pillow==11.1.0
 PyMuPDF==1.25.5
 reportlab==4.4.0
 Werkzeug==3.1.3
-flask-cors==4.0.0
 flask-wtf==1.2.2
 flask-limiter==3.8.0
 requests==2.32.3
