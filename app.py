@@ -341,46 +341,53 @@ def upload_file():
     return jsonify(resultado)
 
 def procesar_pdf(filepath, año, mes, tipo_libro, numero_libro):
-    """Procesa el PDF según la Resolución 202-2021"""
-    
+    """Procesa el PDF según la Resolución 202-2021.
+    Abre el PDF una sola vez y lo reutiliza en OCR + splitting."""
+
+    import fitz as _fitz
+
     logger.info(f"INICIANDO PROCESAMIENTO - Archivo: {filepath}, Año: {año}, Mes: {mes}, Tipo: {tipo_libro}, Libro: {numero_libro}")
-    
+
+    pdf_doc = _fitz.open(filepath)
     try:
-        # 1. Buscar códigos notariales (OCR solo en zona superior del PDF)
+        # 1. Buscar códigos notariales (OCR en zona superior, reutiliza pdf_doc)
         logger.info("PASO 1: Buscando códigos notariales...")
         processor = ProcesadorOCR()
-        resultado = processor.buscar_codigos_notariales('', año, tipo_libro, pdf_path=filepath)
-        
+        resultado = processor.buscar_codigos_notariales(
+            '', año, tipo_libro, pdf_path=filepath, pdf_document=pdf_doc
+        )
+
         if isinstance(resultado, tuple):
             codigos_encontrados, codigo_a_pagina = resultado
         else:
             codigos_encontrados = resultado
             codigo_a_pagina = {}
-        
+
         if not codigos_encontrados:
             logger.warning("No se encontraron códigos válidos")
             return {'error': 'No se encontraron códigos válidos en el documento'}
-        
+
         logger.info(f"Códigos encontrados: {len(codigos_encontrados)}")
-        
+
         # 2. Validar secuenciales
         logger.info("PASO 2: Validando secuenciales...")
         validador = ValidadorNotarial()
         validacion = validador.validar_secuenciales(codigos_encontrados)
         logger.info("Validación completada")
-        
-        # 3. Dividir PDF
+
+        # 3. Dividir PDF (reutiliza pdf_doc abierto)
         logger.info("PASO 3: Dividiendo PDF...")
         splitter = PDFSplitter()
         archivos_generados = splitter.dividir_por_codigos(
-            filepath, 
-            codigos_encontrados, 
+            filepath,
+            codigos_encontrados,
             año,
             mes,
             tipo_libro,
             numero_libro,
             app.config['PROCESSED_FOLDER'],
-            codigo_a_pagina=codigo_a_pagina
+            codigo_a_pagina=codigo_a_pagina,
+            pdf_document=pdf_doc,
         )
         
         if not archivos_generados:

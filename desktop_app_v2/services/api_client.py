@@ -78,7 +78,7 @@ class APIClient:
                 files = {'pdf_file': (os.path.basename(pdf_path), f, 'application/pdf')}
                 data = {
                     'username': username,
-                    'ano': ano,
+                    'año': ano,
                     'mes': mes,
                     'tipo_libro': tipo_libro,
                     'numero_libro': str(numero_libro)
