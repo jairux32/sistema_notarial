@@ -1,5 +1,8 @@
+from __future__ import annotations
+from typing import List, Dict, Any
+
 class ValidadorNotarial:
-    def validar_secuenciales(self, codigos):
+    def validar_secuenciales(self, codigos: List[str]) -> Dict[str, Any]:
         """Valida la continuidad de los secuenciales"""
         if not codigos:
             return {'error': 'No hay códigos para validar'}

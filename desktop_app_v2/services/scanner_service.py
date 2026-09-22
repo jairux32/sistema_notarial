@@ -147,27 +147,19 @@ class ScannerService:
         return devices
 
     def scan_single(self, device_id=None, output_dir=None):
-        if device_id is None:
-            device_id = self.selected_device
-        if output_dir is None:
-            output_dir = tempfile.mkdtemp(prefix='scan_')
-
-        if device_id == 'simulated_scanner':
-            return self._simulate_scan(output_dir, pages=1)
-
-        if self.system == 'Windows':
-            return self._scan_wia(device_id, output_dir)
-        else:
-            return self._scan_sane(device_id, output_dir)
+        return self._scan(device_id, output_dir, pages=1)
 
     def scan_batch(self, device_id=None, output_dir=None):
+        return self._scan(device_id, output_dir, pages=3)
+
+    def _scan(self, device_id, output_dir, pages=1):
         if device_id is None:
             device_id = self.selected_device
         if output_dir is None:
             output_dir = tempfile.mkdtemp(prefix='scan_')
 
         if device_id == 'simulated_scanner':
-            return self._simulate_scan(output_dir, pages=3)
+            return self._simulate_scan(output_dir, pages=pages)
 
         if self.system == 'Windows':
             return self._scan_wia(device_id, output_dir)

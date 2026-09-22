@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Tuple, List, Dict, Optional
 import pytesseract
 from PIL import Image
 import fitz  # PyMuPDF
@@ -6,69 +8,63 @@ import tempfile
 import os
 
 class ProcesadorOCR:
-    def __init__(self):
+    def __init__(self) -> None:
         self.codigo_notaria = "1101007"
         from config import TESSERACT_CMD
         pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
     
-    def extraer_texto(self, pdf_path, solo_zona_superior=False):
+    def extraer_texto(self, pdf_path: str, solo_zona_superior: bool = False) -> str:
         """Extrae texto del PDF usando texto nativo cuando está disponible, OCR como fallback.
         
         Si solo_zona_superior=True, solo extrae OCR de los primeros ~150px (más rápido).
         """
         texto_completo = ""
-        
-        pdf_document = fitz.open(pdf_path)
-        total_paginas = len(pdf_document)
-        
         paginas_texto_nativo = 0
         paginas_ocr = 0
         
-        print(f"📄 Extrayendo texto de {total_paginas} páginas...")
-        
-        for page_num in range(total_paginas):
-            page = pdf_document[page_num]
+        with fitz.open(pdf_path) as pdf_document:
+            total_paginas = len(pdf_document)
+            print(f"📄 Extrayendo texto de {total_paginas} páginas...")
             
-            if solo_zona_superior:
-                # Solo extraer bloques de la zona superior (y < 150)
-                blocks = page.get_text('blocks')
-                texto_nativo = ""
-                for b in blocks:
-                    x0, y0, x1, y1 = b[:4]
-                    content = b[4]
-                    if y0 < 150 and not content.startswith('<image:'):
-                        texto_nativo += content + "\n"
-            else:
-                texto_nativo = page.get_text()
-            
-            if len(texto_nativo.strip()) > 20:
-                texto_completo += texto_nativo + "\n"
-                paginas_texto_nativo += 1
-            else:
+            for page_num in range(total_paginas):
+                page = pdf_document[page_num]
+                
                 if solo_zona_superior:
-                    # Cropear solo la zona superior para OCR (mucho más rápido)
-                    rect = page.rect
-                    top_rect = fitz.Rect(rect.x0, rect.y0, rect.x1, min(rect.y0 + 200, rect.y1))
-                    pix = page.get_pixmap(clip=top_rect)
+                    blocks = page.get_text('blocks')
+                    texto_nativo = ""
+                    for b in blocks:
+                        x0, y0, x1, y1 = b[:4]
+                        content = b[4]
+                        if y0 < 150 and not content.startswith('<image:'):
+                            texto_nativo += content + "\n"
                 else:
-                    pix = page.get_pixmap()
+                    texto_nativo = page.get_text()
                 
-                temp_img_path = tempfile.mktemp(suffix='.png')
-                pix.save(temp_img_path)
+                if len(texto_nativo.strip()) > 20:
+                    texto_completo += texto_nativo + "\n"
+                    paginas_texto_nativo += 1
+                else:
+                    if solo_zona_superior:
+                        rect = page.rect
+                        top_rect = fitz.Rect(rect.x0, rect.y0, rect.x1, min(rect.y0 + 200, rect.y1))
+                        pix = page.get_pixmap(clip=top_rect)
+                    else:
+                        pix = page.get_pixmap()
+                    
+                    temp_img_path = tempfile.mktemp(suffix='.png')
+                    pix.save(temp_img_path)
+                    
+                    texto_pagina = pytesseract.image_to_string(
+                        Image.open(temp_img_path),
+                        lang='spa'
+                    )
+                    texto_completo += texto_pagina + "\n"
+                    paginas_ocr += 1
+                    
+                    os.unlink(temp_img_path)
                 
-                texto_pagina = pytesseract.image_to_string(
-                    Image.open(temp_img_path),
-                    lang='spa'
-                )
-                texto_completo += texto_pagina + "\n"
-                paginas_ocr += 1
-                
-                os.unlink(temp_img_path)
-            
-            if (page_num + 1) % 100 == 0:
-                print(f"   Procesadas {page_num + 1}/{total_paginas} páginas (nativo: {paginas_texto_nativo}, OCR: {paginas_ocr})")
-        
-        pdf_document.close()
+                if (page_num + 1) % 100 == 0:
+                    print(f"   Procesadas {page_num + 1}/{total_paginas} páginas (nativo: {paginas_texto_nativo}, OCR: {paginas_ocr})")
         
         print(f"\n✅ Extracción completada:")
         print(f"   📄 Texto nativo: {paginas_texto_nativo} páginas ({paginas_texto_nativo/total_paginas*100:.1f}%)")
@@ -130,7 +126,7 @@ class ProcesadorOCR:
         
         return None
     
-    def _buscar_en_pagina(self, texto_pagina, año_config, tipo_config, blocks=None):
+    def _buscar_en_pagina(self, texto_pagina: str, año_config: str, tipo_config: str, blocks=None) -> List[str]:
         """Busca códigos notariales en el texto de una página"""
         codigos = []
         
@@ -214,7 +210,7 @@ class ProcesadorOCR:
         
         return list(set(codigos_filtrados))
     
-    def buscar_codigos_notariales(self, texto, año_config, tipo_config, pdf_path=None):
+    def buscar_codigos_notariales(self, texto: str, año_config: str, tipo_config: str, pdf_path: Optional[str] = None) -> Tuple[List[str], Dict[str, int]]:
         """Busca códigos notariales. Si se prove pdf_path, busca página por página (más preciso)"""
         
         print(f"🔍 Buscando códigos para año={año_config}, tipo={tipo_config}")
@@ -244,57 +240,53 @@ class ProcesadorOCR:
         
         return self._filtrar_codigos(todos_los_codigos, año_config, tipo_config)
     
-    def _buscar_en_pdf(self, pdf_path, año_config, tipo_config):
+    def _buscar_en_pdf(self, pdf_path: str, año_config: str, tipo_config: str) -> Tuple[List[str], Dict[str, int]]:
         """Busca códigos directamente en el PDF, página por página, zona superior.
         Retorna (codigos, codigo_a_pagina)"""
         import fitz
         from PIL import Image
         
-        pdf_document = fitz.open(pdf_path)
-        total_paginas = len(pdf_document)
-        print(f"📄 Analizando {total_paginas} páginas del PDF...")
-        
         todos_los_codigos = []
         codigo_a_pagina = {}
         paginas_con_codigo = 0
         
-        for page_num in range(total_paginas):
-            page = pdf_document[page_num]
+        with fitz.open(pdf_path) as pdf_document:
+            total_paginas = len(pdf_document)
+            print(f"📄 Analizando {total_paginas} páginas del PDF...")
             
-            # Extraer bloques de la zona superior (y < 150)
-            blocks = page.get_text('blocks')
-            texto_superior = ""
-            for b in blocks:
-                x0, y0, x1, y1 = b[:4]
-                content = b[4]
-                if y0 < 150 and not content.startswith('<image:'):
-                    texto_superior += content + "\n"
-            
-            # Si no hay texto nativo en zona superior, usar OCR
-            if len(texto_superior.strip()) < 10:
-                rect = page.rect
-                top_rect = fitz.Rect(rect.x0, rect.y0, rect.x1, min(rect.y0 + 200, rect.y1))
-                pix = page.get_pixmap(clip=top_rect)
-                temp_img_path = tempfile.mktemp(suffix='.png')
-                pix.save(temp_img_path)
-                texto_superior = pytesseract.image_to_string(
-                    Image.open(temp_img_path), lang='spa'
-                )
-                os.unlink(temp_img_path)
-            
-            codigos_pagina = self._buscar_en_pagina(texto_superior, año_config, tipo_config)
-            
-            if codigos_pagina:
-                paginas_con_codigo += 1
-                for c in codigos_pagina:
-                    if c not in codigo_a_pagina:
-                        codigo_a_pagina[c] = page_num
-                todos_los_codigos.extend(codigos_pagina)
-            
-            if (page_num + 1) % 200 == 0:
-                print(f"   {page_num + 1}/{total_paginas} páginas...")
-        
-        pdf_document.close()
+            for page_num in range(total_paginas):
+                page = pdf_document[page_num]
+                
+                blocks = page.get_text('blocks')
+                texto_superior = ""
+                for b in blocks:
+                    x0, y0, x1, y1 = b[:4]
+                    content = b[4]
+                    if y0 < 150 and not content.startswith('<image:'):
+                        texto_superior += content + "\n"
+                
+                if len(texto_superior.strip()) < 10:
+                    rect = page.rect
+                    top_rect = fitz.Rect(rect.x0, rect.y0, rect.x1, min(rect.y0 + 200, rect.y1))
+                    pix = page.get_pixmap(clip=top_rect)
+                    temp_img_path = tempfile.mktemp(suffix='.png')
+                    pix.save(temp_img_path)
+                    texto_superior = pytesseract.image_to_string(
+                        Image.open(temp_img_path), lang='spa'
+                    )
+                    os.unlink(temp_img_path)
+                
+                codigos_pagina = self._buscar_en_pagina(texto_superior, año_config, tipo_config)
+                
+                if codigos_pagina:
+                    paginas_con_codigo += 1
+                    for c in codigos_pagina:
+                        if c not in codigo_a_pagina:
+                            codigo_a_pagina[c] = page_num
+                    todos_los_codigos.extend(codigos_pagina)
+                
+                if (page_num + 1) % 200 == 0:
+                    print(f"   {page_num + 1}/{total_paginas} páginas...")
         
         print(f"\n📊 Resumen:")
         print(f"   Páginas: {total_paginas}, Con código: {paginas_con_codigo}")
@@ -302,7 +294,7 @@ class ProcesadorOCR:
         codigos_filtrados = self._filtrar_codigos(todos_los_codigos, año_config, tipo_config)
         return codigos_filtrados, codigo_a_pagina
     
-    def _filtrar_codigos(self, todos_los_codigos, año_config, tipo_config):
+    def _filtrar_codigos(self, todos_los_codigos: List[str], año_config: str, tipo_config: str) -> List[str]:
         """Filtra y deduplica códigos"""
         codigos_raw = list(dict.fromkeys(todos_los_codigos))
         

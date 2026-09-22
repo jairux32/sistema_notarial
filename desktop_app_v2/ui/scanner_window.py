@@ -474,10 +474,24 @@ class ScannerWindow(QWidget):
                     "de sincronizacion. Se subira cuando el servidor este disponible."
                 )
 
+    def _cleanup_temp(self):
+        import shutil
+        if self.temp_dir and os.path.exists(self.temp_dir):
+            try:
+                shutil.rmtree(self.temp_dir)
+            except OSError:
+                pass
+            self.temp_dir = None
+
     def _on_logout(self):
+        self._cleanup_temp()
         self.api.token = None
         self.api.user = None
         self.back_to_login.emit()
+
+    def closeEvent(self, event):
+        self._cleanup_temp()
+        super().closeEvent(event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

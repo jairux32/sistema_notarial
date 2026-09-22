@@ -1,10 +1,8 @@
 import fitz
 import os
-import sys
 import tempfile
 import pytesseract
 from PIL import Image
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from config import MAPEO_TIPOS
 
 class PDFSplitter:
@@ -27,7 +25,7 @@ class PDFSplitter:
         total_paginas = len(pdf_document)
         print(f"📖 Total de páginas en PDF: {total_paginas}")
         
-        # Si ya tenemos el mapingo, usarlo directamente
+        # Si ya tenemos el mapeo, usarlo directamente
         if codigo_a_pagina:
             print(f"\n📋 Usando mapeo pre-calculado ({len(codigo_a_pagina)} códigos)")
             # Filtrar solo códigos que están en el mapeo

@@ -1,4 +1,6 @@
 """API client for Flask backend with offline queue"""
+from __future__ import annotations
+from typing import Tuple, Optional, Any
 import requests
 import json
 import os
@@ -7,7 +9,7 @@ from datetime import datetime
 
 
 class APIClient:
-    def __init__(self, base_url='http://localhost:5000'):
+    def __init__(self, base_url: str = 'http://localhost:5000'):
         self.base_url = base_url.rstrip('/')
         self.token = None
         self.user = None
