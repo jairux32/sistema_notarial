@@ -1,4 +1,3 @@
-import importlib.util
 import os
 import uuid
 from unittest.mock import patch
@@ -6,11 +5,7 @@ from unittest.mock import patch
 import fitz
 import pytest
 
-_root = os.path.normpath(os.path.join(os.path.dirname(__file__), '..'))
-_spec = importlib.util.spec_from_file_location("_app_mod", os.path.join(_root, "app.py"))
-_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_mod)
-procesar_pdf = _mod.procesar_pdf
+from conftest import _flask_app, procesar_pdf, procesamiento_cache
 
 
 class TestFullPipelineWithCodes:
@@ -103,8 +98,8 @@ class TestPipelineStoresCache:
             result = procesar_pdf(pdf_path, '2026', 'MARZO', 'D', 1)
 
         session_id = result['session_id']
-        assert session_id in _mod.procesamiento_cache
-        cached = _mod.procesamiento_cache[session_id]
+        assert session_id in procesamiento_cache
+        cached = procesamiento_cache[session_id]
         assert cached['filepath'] == pdf_path
         assert cached['año'] == '2026'
         assert cached['mes'] == 'MARZO'

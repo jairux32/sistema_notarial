@@ -348,8 +348,8 @@ def procesar_pdf(filepath, año, mes, tipo_libro, numero_libro):
 
     logger.info(f"INICIANDO PROCESAMIENTO - Archivo: {filepath}, Año: {año}, Mes: {mes}, Tipo: {tipo_libro}, Libro: {numero_libro}")
 
-    pdf_doc = _fitz.open(filepath)
     try:
+        pdf_doc = _fitz.open(filepath)
         # 1. Buscar códigos notariales (OCR en zona superior, reutiliza pdf_doc)
         logger.info("PASO 1: Buscando códigos notariales...")
         processor = ProcesadorOCR()

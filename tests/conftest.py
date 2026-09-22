@@ -20,6 +20,8 @@ _app_spec = importlib.util.spec_from_file_location("_flask_app", os.path.join(_r
 _app_mod = importlib.util.module_from_spec(_app_spec)
 _app_spec.loader.exec_module(_app_mod)
 _flask_app = _app_mod.app
+procesar_pdf = _app_mod.procesar_pdf
+procesamiento_cache = _app_mod.procesamiento_cache
 
 
 # ---------------------------------------------------------------------------
