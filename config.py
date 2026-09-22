@@ -39,6 +39,9 @@ MAPEO_TIPOS = {
     'A': 'ARRIENDOS'
 }
 
+# Inverso: nombre -> letra (generado automáticamente)
+MAPEO_TIPOS_INVERSO = {v: k for k, v in MAPEO_TIPOS.items()}
+
 # Configuración de usuario
 # Los usuarios se gestionan en la base de datos (models.py - Usuario)
 # USUARIOS migrados a PostgreSQL con hash de contraseñas

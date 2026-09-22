@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS documentos (
     cuantia DECIMAL(15, 2),
     
     -- Metadatos
+    mes VARCHAR(20),
+    numero_libro INTEGER,
     total_paginas INTEGER,
     confianza_promedio FLOAT,
     requiere_revision BOOLEAN DEFAULT FALSE,
@@ -71,6 +73,7 @@ CREATE TABLE IF NOT EXISTS configuracion (
 CREATE INDEX IF NOT EXISTS idx_documentos_session ON documentos(session_id);
 CREATE INDEX IF NOT EXISTS idx_documentos_fecha ON documentos(fecha_procesamiento);
 CREATE INDEX IF NOT EXISTS idx_documentos_numero ON documentos(numero_escritura);
+CREATE INDEX IF NOT EXISTS idx_documentos_usuario ON documentos(usuario_id);
 CREATE INDEX IF NOT EXISTS idx_auditoria_documento ON auditoria(documento_id);
 CREATE INDEX IF NOT EXISTS idx_auditoria_fecha ON auditoria(fecha);
 
@@ -88,10 +91,9 @@ CREATE TRIGGER trigger_actualizar_documentos
     FOR EACH ROW
     EXECUTE FUNCTION actualizar_timestamp();
 
--- Insertar usuario admin por defecto
--- Password: admin123 (CAMBIAR EN PRODUCCIÓN)
+-- Insertar usuario admin por defecto (password: amIb4in9DEpT7pPYxopk5Q — CAMBIAR EN PRODUCCIÓN)
 INSERT INTO usuarios (username, password_hash, nombre_completo, rol)
-VALUES ('admin', 'pbkdf2:sha256:260000$salt$hash', 'Administrador', 'admin')
+VALUES ('admin', 'pbkdf2:sha256:600000$97ZGzSJHZOYnPyPX$7bc0fbdff6931a06285008c3485ed9afd29384da67baa09088106b1812c05ebf', 'Administrador', 'admin')
 ON CONFLICT (username) DO NOTHING;
 
 -- Configuración inicial

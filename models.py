@@ -127,29 +127,4 @@ class Auditoria(db.Model):
         }
 
 
-class Configuracion(db.Model):
-    __tablename__ = 'configuracion'
-    
-    clave = db.Column(db.String(100), primary_key=True)
-    valor = db.Column(db.Text)
-    descripcion = db.Column(db.Text)
-    actualizado_en = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    @staticmethod
-    def get_valor(clave, default=None):
-        """Obtener valor de configuración"""
-        config = Configuracion.query.get(clave)
-        return config.valor if config else default
-    
-    @staticmethod
-    def set_valor(clave, valor, descripcion=None):
-        """Establecer valor de configuración"""
-        config = Configuracion.query.get(clave)
-        if config:
-            config.valor = valor
-            if descripcion:
-                config.descripcion = descripcion
-        else:
-            config = Configuracion(clave=clave, valor=valor, descripcion=descripcion)
-            db.session.add(config)
-        db.session.commit()
+

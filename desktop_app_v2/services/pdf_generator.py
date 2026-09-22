@@ -12,6 +12,8 @@ def generate_searchable_pdf(image_paths, output_path):
     except ImportError as e:
         return False, f"Dependencia faltante: {e}"
 
+    master_doc = None
+    page_doc = None
     try:
         master_doc = fitz.open()
 
@@ -25,15 +27,19 @@ def generate_searchable_pdf(image_paths, output_path):
             page_doc = fitz.open("pdf", pdf_bytes)
             master_doc.insert_pdf(page_doc)
             page_doc.close()
+            page_doc = None
 
         if len(master_doc) == 0:
-            master_doc.close()
             return False, "No se generaron paginas"
 
         os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
         master_doc.save(output_path)
-        master_doc.close()
         return True, None
 
     except Exception as e:
         return False, str(e)
+    finally:
+        if page_doc:
+            page_doc.close()
+        if master_doc:
+            master_doc.close()

@@ -1,6 +1,7 @@
 """Session persistence manager"""
 import json
 import os
+import stat
 
 SESSION_FILE = 'session.json'
 
@@ -15,6 +16,10 @@ class SessionManager:
         data = {'token': token, 'user': user_data}
         with open(self.session_path, 'w') as f:
             json.dump(data, f, indent=2)
+        try:
+            os.chmod(self.session_path, stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
 
     def load(self):
         if not os.path.exists(self.session_path):

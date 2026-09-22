@@ -178,6 +178,11 @@ class ScannerService:
         """Escanear via WIA en Windows"""
         try:
             # Script WIA para escanear
+            # Sanitize inputs to prevent PowerShell injection
+            import re
+            safe_id = re.sub(r'[^a-zA-Z0-9_\\\-\.]', '', device_id)
+            safe_dir = re.sub(r'[^a-zA-Z0-9_\\\-\. ]', '', output_dir)
+
             ps_script = f'''
 Add-Type -AssemblyName System.Drawing
 
@@ -186,7 +191,7 @@ try {{
     $device = $null
     
     foreach ($d in $deviceManager.DeviceInfos) {{
-        if ($d.DeviceID -eq "{device_id}") {{
+        if ($d.DeviceID -eq "{safe_id}") {{
             $device = $d
             break
         }}
@@ -199,7 +204,6 @@ try {{
     
     $item = $device.Items(1)
     
-    # Configurar resolucion
     foreach ($prop in $item.Properties) {{
         if ($prop.Name -eq "Horizontal Resolution") {{
             $prop.Value = 300
@@ -213,7 +217,7 @@ try {{
     }}
     
     $image = $item.Scan()
-    $outputPath = "{output_dir.replace('\\', '\\\\')}"
+    $outputPath = "{safe_dir.replace(chr(92), chr(92)+chr(92))}"
     $fileName = "scan_" + [System.Guid]::NewGuid().ToString("N").Substring(0,8) + ".png"
     $fullPath = Join-Path $outputPath $fileName
     
@@ -235,7 +239,7 @@ try {{
 
             try:
                 os.remove(ps_file)
-            except:
+            except OSError:
                 pass
 
             if result.stdout.startswith('OK:'):

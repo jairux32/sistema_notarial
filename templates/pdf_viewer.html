@@ -236,7 +236,7 @@
                 window.opener.postMessage({
                     action: 'process',
                     filename: '{{ filename }}'
-                }, '*');
+                }, window.location.origin);
             }
             window.close();
         }

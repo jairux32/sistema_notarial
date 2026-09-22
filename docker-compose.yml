@@ -15,10 +15,6 @@ services:
       - ${EXTERNAL_DISK_PATH:-/mnt/external}/postgres_data:/var/lib/postgresql/data
       # Script de inicialización
       - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
-    ports:
-      - "5432:5432"
-    networks:
-      - notarial_network
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U notarial_user -d sistema_notarial" ]
       interval: 10s
@@ -93,6 +89,4 @@ services:
       retries: 3
       start_period: 40s
 
-networks:
-  notarial_network:
-    driver: bridge
+

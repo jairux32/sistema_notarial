@@ -1,5 +1,9 @@
 from flask import Flask, render_template, request, redirect, url_for, session, send_file, jsonify, flash, abort
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from flask_wtf.csrf import CSRFProtect
+from flask_migrate import Migrate
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import os
 import hashlib
 import json
@@ -12,7 +16,7 @@ from dotenv import load_dotenv
 from utils.ocr_processor import ProcesadorOCR
 from utils.pdf_splitter import PDFSplitter
 from utils.validator import ValidadorNotarial
-from config import MAPEO_TIPOS
+from config import MAPEO_TIPOS, MAPEO_TIPOS_INVERSO
 
 import requests
 
@@ -22,14 +26,23 @@ from models import db, Usuario, Documento, Auditoria as AuditoriaDB
 # Cargar variables de entorno
 load_dotenv()
 
-# Configurar logging
+# Configurar logging con rotación
+from logging.handlers import RotatingFileHandler
+
+_log_dir = os.getenv('LOG_FOLDER', 'logs')
+_log_path = os.path.join(_log_dir, 'app.log')
+
+_handlers = [logging.StreamHandler()]
+try:
+    os.makedirs(_log_dir, exist_ok=True)
+    _handlers.insert(0, RotatingFileHandler(_log_path, maxBytes=10*1024*1024, backupCount=5))
+except OSError:
+    pass
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    handlers=[
-        logging.FileHandler('app.log'),
-        logging.StreamHandler()
-    ]
+    handlers=_handlers
 )
 logger = logging.getLogger('sistema_notarial')
 
@@ -38,7 +51,11 @@ app = Flask(__name__)
 import platform
 
 # Configuración desde variables de entorno
-app.secret_key = os.getenv('SECRET_KEY', 'dev_key_123')
+app.secret_key = os.getenv('SECRET_KEY')
+if not app.secret_key or app.secret_key in ('dev_key_123', 'change-this-secret-key-in-production-use-random-string'):
+    import secrets
+    app.secret_key = secrets.token_hex(32)
+    logger.warning("SECRET_KEY not set or using default — generated random key (sessions will invalidate on restart)")
 
 # Configuración de base de datos (SQLite en Windows, PostgreSQL en Linux/Docker)
 DATABASE_URL = os.getenv('DATABASE_URL')
@@ -68,6 +85,28 @@ app.config['ESCANEO_SEPARADO_FOLDER'] = os.getenv('ESCANEO_SEPARADO_FOLDER', 'es
 
 # Inicializar base de datos
 db.init_app(app)
+migrate = Migrate(app, db)
+
+# Session timeout (1 hour)
+from datetime import timedelta
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
+
+# CSRF Protection — endpoints de API usan token, no cookies
+csrf = CSRFProtect(app)
+
+# Rate limiting
+limiter = Limiter(get_remote_address, app=app, default_limits=["200 per day"])
+
+# Upload size limit (100MB)
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
+
+@app.after_request
+def set_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    return response
 
 # Almacenamiento temporal de procesamiento (en producción usar Redis/DB)
 procesamiento_cache = {}
@@ -202,6 +241,7 @@ def index():
     return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("10 per minute")
 def login():
     if request.method == 'POST':
         username = request.form['username']
@@ -260,40 +300,47 @@ def upload_file():
     if file.filename == '':
         return jsonify({'error': 'Nombre de archivo vacío'}), 400
     
-    if file and file.filename.lower().endswith('.pdf'):
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        
-        año = request.form.get('año')
-        mes = request.form.get('mes', 'DESCONOCIDO')
-        tipo = request.form.get('tipo_libro', 'P') # Changed from 'tipo' to 'tipo_libro' to match form
-        numero_libro = request.form.get('numero_libro', 0)
-        
-        usuario_actual = current_user if current_user.is_authenticated else None
-        
-        # Procesar
-        resultado = procesar_pdf(filepath, año, mes, tipo, numero_libro)
-        
-        # Guardar en base de datos
-        if resultado.get('success'):
-            try:
-                session_id = resultado.get('session_id')
-                if usuario_actual:
-                    guardar_documento_procesado(
-                        session_id=session_id,
-                        nombre_archivo=filename,
-                        resultado_procesamiento=resultado,
-                        usuario_actual=usuario_actual,
-                        mes=mes,
-                        numero_libro=numero_libro
-                    )
-            except Exception as e:
-                logger.warning(f"Error guardando en BD (continuando): {str(e)}")
-        
-        return jsonify(resultado)
+    if not file.filename.lower().endswith('.pdf'):
+        return jsonify({'error': 'Solo se permiten archivos PDF'}), 400
     
-    return jsonify({'error': 'Archivo no válido'}), 400
+    # Validar magic bytes PDF
+    header = file.read(5)
+    file.seek(0)
+    if header != b'%PDF-':
+        return jsonify({'error': 'El archivo no es un PDF válido'}), 400
+    
+    filename = secure_filename(file.filename)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
+    
+    año = request.form.get('año')
+    mes = request.form.get('mes', 'DESCONOCIDO')
+    tipo = request.form.get('tipo_libro', 'P')
+    try:
+        numero_libro = int(request.form.get('numero_libro', 0))
+    except (ValueError, TypeError):
+        numero_libro = 0
+    
+    usuario_actual = current_user if current_user.is_authenticated else None
+    
+    resultado = procesar_pdf(filepath, año, mes, tipo, numero_libro)
+    
+    if resultado.get('success'):
+        try:
+            session_id = resultado.get('session_id')
+            if usuario_actual:
+                guardar_documento_procesado(
+                    session_id=session_id,
+                    nombre_archivo=filename,
+                    resultado_procesamiento=resultado,
+                    usuario_actual=usuario_actual,
+                    mes=mes,
+                    numero_libro=numero_libro
+                )
+        except Exception as e:
+            logger.warning(f"Error guardando en BD (continuando): {e}")
+    
+    return jsonify(resultado)
 
 def procesar_pdf(filepath, año, mes, tipo_libro, numero_libro):
     """Procesa el PDF según la Resolución 202-2021"""
@@ -386,8 +433,8 @@ def procesar_pdf(filepath, año, mes, tipo_libro, numero_libro):
         }
         
     except Exception as e:
-        logger.error(f"ERROR EN PROCESAMIENTO: {str(e)}", exc_info=True)
-        return {'error': str(e)}
+        logger.error(f"ERROR EN PROCESAMIENTO: {e}", exc_info=True)
+        return {'error': 'Error en el procesamiento del documento'}
 
 def generar_reporte_pdf(archivos, validacion, año, tipo, original_path):
     """Genera reporte en PDF para anexar al acta"""
@@ -549,8 +596,8 @@ def agregar_codigo_manual():
         })
         
     except Exception as e:
-        logger.error(f"ERROR: {str(e)}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"ERROR: {e}", exc_info=True)
+        return jsonify({'error': 'Error interno del servidor'}), 500
 
 @app.route('/documentos')
 @login_required
@@ -562,7 +609,7 @@ def documentos_lista():
     anios_disponibles = sorted([d for d in os.listdir(processed_folder) 
                                 if os.path.isdir(os.path.join(processed_folder, d)) and d.isdigit()], reverse=True)
     
-    tipos_map = {'PROTOCOLO': 'P', 'DILIGENCIA': 'D', 'CERTIFICACIONES': 'C', 'OTROS': 'O', 'ARRIENDOS': 'A'}
+    tipos_map = MAPEO_TIPOS_INVERSO
     
     archivos = []
     archivos_rutas = {}  # archivo -> ruta relativa
@@ -587,10 +634,50 @@ def documentos_lista():
 @app.route('/download/<path:filename>')
 @login_required
 def download_file(filename):
-    filepath = os.path.join(app.config['PROCESSED_FOLDER'], filename)
+    processed_folder = os.path.realpath(app.config['PROCESSED_FOLDER'])
+    filepath = os.path.realpath(os.path.join(processed_folder, filename))
+    if not filepath.startswith(processed_folder + os.sep) and filepath != processed_folder:
+        abort(403)
     if not os.path.exists(filepath):
         abort(404)
     return send_file(filepath)
+
+@app.route('/download_zip', methods=['POST'])
+@login_required
+def download_zip():
+    """Download multiple files as a ZIP archive"""
+    import zipfile
+    import io
+
+    data = request.json
+    filenames = data.get('files', [])
+
+    if not filenames:
+        return jsonify({'error': 'No files selected'}), 400
+
+    processed_folder = os.path.realpath(app.config['PROCESSED_FOLDER'])
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        added = 0
+        for fname in filenames:
+            filepath = os.path.realpath(os.path.join(processed_folder, fname))
+            if not filepath.startswith(processed_folder + os.sep):
+                continue
+            if os.path.exists(filepath) and os.path.isfile(filepath):
+                zf.write(filepath, os.path.basename(fname))
+                added += 1
+
+    if added == 0:
+        return jsonify({'error': 'No valid files found'}), 400
+
+    zip_buffer.seek(0)
+    return send_file(
+        zip_buffer,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=f'documentos_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
+    )
 
 
 
@@ -603,7 +690,12 @@ def logout():
 
 # ==================== API PARA DESKTOP APP ====================
 
+# Token store: token -> {"username": ..., "created": ...}
+api_tokens = {}
+
 @app.route('/api/login', methods=['POST'])
+@csrf.exempt
+@limiter.limit("10 per minute")
 def api_login():
     """Endpoint de login para la app de escritorio"""
     try:
@@ -611,40 +703,66 @@ def api_login():
         username = data.get('username')
         password = data.get('password')
         
+        if not username or not password:
+            return jsonify({'success': False, 'error': 'Faltan credenciales'}), 400
+        
         usuario = Usuario.query.filter_by(username=username, activo=True).first()
         
         if usuario and usuario.check_password(password):
-            # En producción usar JWT, aquí simulamos retorno seguro
+            token = f"token_{uuid.uuid4().hex}"
+            api_tokens[token] = {
+                'username': username,
+                'created': datetime.utcnow()
+            }
             return jsonify({
                 'success': True,
                 'user': {
                     'username': usuario.username,
                     'role': getattr(usuario, 'rol', 'user')
                 },
-                'token': f"session_{uuid.uuid4()}"  # Token simple por ahora
+                'token': token
             })
         return jsonify({'success': False, 'error': 'Credenciales inválidas'}), 401
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error API Login: {e}", exc_info=True)
+        return jsonify({'error': 'Error interno del servidor'}), 500
+
+def validate_api_token():
+    """Valida token de la desktop app. Retorna username o None."""
+    auth_header = request.headers.get('Authorization', '')
+    token = request.headers.get('X-Auth-Token', '') or auth_header.replace('Bearer ', '')
+    if not token or token not in api_tokens:
+        return None
+    return api_tokens[token]['username']
 
 @app.route('/api/upload_scan', methods=['POST'])
+@csrf.exempt
 def api_upload_scan():
     """Recibe PDF procesado desde desktop app"""
     try:
+        api_username = validate_api_token()
+        if not api_username:
+            return jsonify({'error': 'Token inválido o expirado'}), 401
+        
         if 'pdf_file' not in request.files:
             return jsonify({'error': 'No se envió archivo'}), 400
             
         file = request.files['pdf_file']
-        # Metadatos vienen en form-data
         año = request.form.get('año')
         mes = request.form.get('mes', 'DESCONOCIDO')
         tipo_libro = request.form.get('tipo_libro')
-        numero_libro = request.form.get('numero_libro', 0)
+        try:
+            numero_libro = int(request.form.get('numero_libro', 0))
+        except (ValueError, TypeError):
+            numero_libro = 0
         username = request.form.get('username')
         
         if not all([año, tipo_libro, username]):
              return jsonify({'error': 'Faltan metadatos (año, tipo, usuario)'}), 400
+        
+        if username != api_username:
+            return jsonify({'error': 'Usuario no coincide con token'}), 403
         
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
@@ -652,10 +770,8 @@ def api_upload_scan():
         
         logger.info(f"Recibido desde Desktop App: {filename} - Usuario: {username}, Año: {año}, Mes: {mes}, Tipo: {tipo_libro}, Libro: {numero_libro}")
         
-        # Procesar (Validación/Splitting)
         resultado = procesar_pdf(filepath, año, mes, tipo_libro, numero_libro)
         
-        # Asignar usuario
         usuario_db = Usuario.query.filter_by(username=username).first()
         user_obj = User(usuario_db) if usuario_db else None
         
@@ -673,8 +789,8 @@ def api_upload_scan():
         return jsonify(resultado)
         
     except Exception as e:
-        logger.error(f"Error API Upload: {str(e)}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error API Upload: {e}", exc_info=True)
+        return jsonify({'error': 'Error interno del servidor'}), 500
 
 if __name__ == '__main__':
     # Crear directorios necesarios
@@ -693,4 +809,5 @@ if __name__ == '__main__':
         for tipo in MAPEO_TIPOS.values():
             os.makedirs(os.path.join('escaneo_separado', str(año), tipo), exist_ok=True)
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    debug_mode = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+    app.run(debug=debug_mode, host='0.0.0.0', port=5000)

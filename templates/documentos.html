@@ -59,10 +59,28 @@
             </p>
 
             {% if archivos %}
+            <div style="margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+                <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-weight: bold;">
+                    <input type="checkbox" id="select-all" onchange="toggleAll(this)">
+                    Seleccionar todos
+                </label>
+                <span id="selected-count" style="color: var(--text-secondary); font-size: 0.9rem;"></span>
+                <div style="flex-grow: 1;"></div>
+                <button onclick="downloadSelected()" class="btn btn-success" id="btn-download-selected" disabled>
+                    📥 Descargar Seleccionados
+                </button>
+                <button onclick="downloadAll()" class="btn btn-primary">
+                    📦 Descargar Todos (ZIP)
+                </button>
+            </div>
+
             <div style="overflow-x: auto;">
                 <table style="width: 100%; border-collapse: collapse;">
                     <thead>
                         <tr style="text-align: left; border-bottom: 2px solid var(--border-color);">
+                            <th style="padding: 0.75rem; width: 40px;">
+                                <input type="checkbox" id="check-all-header" onchange="toggleAll(this)">
+                            </th>
                             <th style="padding: 0.75rem;">#</th>
                             <th style="padding: 0.75rem;">Código</th>
                             <th style="padding: 0.75rem;">Secuencial</th>
@@ -71,7 +89,11 @@
                     </thead>
                     <tbody>
                         {% for archivo in archivos %}
-                        <tr style="border-bottom: 1px solid var(--border-color);">
+                        <tr style="border-bottom: 1px solid var(--border-color);" class="file-row">
+                            <td style="padding: 0.75rem;">
+                                <input type="checkbox" class="file-checkbox" value="{{ archivos_rutas[archivo] }}"
+                                       onchange="updateSelection()">
+                            </td>
                             <td style="padding: 0.75rem; color: var(--text-muted);">{{ loop.index }}</td>
                             <td style="padding: 0.75rem; font-family: monospace; font-weight: bold;">
                                 {{ archivo.replace('.pdf', '') }}
@@ -110,6 +132,102 @@
         </div>
         {% endif %}
     </div>
+
+    <script>
+        function toggleAll(source) {
+            const checkboxes = document.querySelectorAll('.file-checkbox');
+            const headerCheck = document.getElementById('check-all-header');
+            const selectAll = document.getElementById('select-all');
+            const state = source.checked;
+
+            checkboxes.forEach(cb => cb.checked = state);
+            headerCheck.checked = state;
+            selectAll.checked = state;
+            updateSelection();
+        }
+
+        function updateSelection() {
+            const checked = document.querySelectorAll('.file-checkbox:checked');
+            const total = document.querySelectorAll('.file-checkbox').length;
+            const btn = document.getElementById('btn-download-selected');
+            const count = document.getElementById('selected-count');
+
+            if (checked.length > 0) {
+                btn.disabled = false;
+                count.textContent = checked.length + ' de ' + total + ' seleccionados';
+            } else {
+                btn.disabled = true;
+                count.textContent = '';
+            }
+
+            const headerCheck = document.getElementById('check-all-header');
+            const selectAll = document.getElementById('select-all');
+            headerCheck.checked = (checked.length === total && total > 0);
+            selectAll.checked = headerCheck.checked;
+        }
+
+        function downloadSelected() {
+            const checked = document.querySelectorAll('.file-checkbox:checked');
+            if (checked.length === 0) return;
+
+            const files = Array.from(checked).map(cb => cb.value);
+
+            fetch('{{ url_for("download_zip") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ files: files })
+            })
+            .then(resp => {
+                if (!resp.ok) throw resp;
+                return resp.blob();
+            })
+            .then(blob => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'documentos_seleccionados.zip';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            })
+            .catch(async err => {
+                const data = await err.json().catch(() => ({}));
+                alert('Error: ' + (data.error || 'No se pudo descargar'));
+            });
+        }
+
+        function downloadAll() {
+            const all = document.querySelectorAll('.file-checkbox');
+            if (all.length === 0) return;
+
+            const files = Array.from(all).map(cb => cb.value);
+
+            fetch('{{ url_for("download_zip") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ files: files })
+            })
+            .then(resp => {
+                if (!resp.ok) throw resp;
+                return resp.blob();
+            })
+            .then(blob => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'documentos_todos.zip';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            })
+            .catch(async err => {
+                const data = await err.json().catch(() => ({}));
+                alert('Error: ' + (data.error || 'No se pudo descargar'));
+            });
+        }
+    </script>
 </body>
 
 </html>

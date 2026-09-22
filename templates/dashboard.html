@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sistema Notarial - Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
 </head>
 
 <body>
@@ -353,6 +354,7 @@
 
                 const response = await fetch('/upload', {
                     method: 'POST',
+                    headers: { 'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content },
                     body: formData
                 });
 
@@ -553,7 +555,10 @@
             try {
                 const response = await fetch('/agregar_codigo_manual', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content
+                    },
                     body: JSON.stringify({
                         session_id: currentSessionId,
                         codigo: codigo,

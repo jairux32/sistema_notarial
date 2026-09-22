@@ -180,20 +180,23 @@ class ProcesadorOCR:
                     codigos.append(codigo)
         
         # Estrategia 7: Búsqueda agresiva con normalización extendida
-        # Maneja Q→0, G→0, O→0, etc. en contexto del código
-        texto_norm_agresivo = re.sub(r'[OoQqGgCc]', '0', texto_pagina)
-        texto_norm_agresivo = re.sub(r'[IiLl|]', '1', texto_norm_agresivo)
-        texto_norm_agresivo = re.sub(r'\s+', ' ', texto_norm_agresivo)
-        patron_agresivo = rf'{año_config}{self.codigo_notaria}{tipo_config}\d{{1,5}}'
-        for match in re.findall(patron_agresivo, texto_norm_agresivo):
-            if match not in codigos:
-                codigos.append(match)
+        # Solo normaliza caracteres ambiguos en contexto de código (cerca del patrón)
+        # Buscar la región del código notarial primero, luego normalizar solo esa región
+        patron_region = rf'{self.codigo_notaria}[A-Z0-9]{{10}}'
+        for region_match in re.finditer(patron_region, texto_pagina):
+            region = region_match.group()
+            region_norm = re.sub(r'[OoQqGgCc]', '0', region)
+            region_norm = re.sub(r'[IiLl|]', '1', region_norm)
+            patron_agresivo = rf'{año_config}{tipo_config}\d{{1,5}}'
+            for match in re.findall(patron_agresivo, region_norm):
+                codigo_completo = f"{año_config}{self.codigo_notaria}{match}"
+                if len(codigo_completo) == 17 and codigo_completo not in codigos:
+                    codigos.append(codigo_completo)
         
-        # Estrategia 8: Búsqueda con "1101007" + ruido antes del tipo + tipo + dígitos
+        # Estrategia 8: Búsqueda con notaria_code + ruido antes del tipo + tipo + dígitos
         # Maneja casos como: 1101007PO(}035, 1101007P0G041, 1101007PG0043
-        patron_ruido_tipo = rf'{self.codigo_notaria}P[IiLl|OoQqGgCcSsZzTt]*[{tipo_config}]\d{{1,5}}'
+        patron_ruido_tipo = rf'{self.codigo_notaria}[A-Z][IiLl|OoQqGgCcSsZzTt]*[{tipo_config}]\d{{1,5}}'
         for match in re.findall(patron_ruido_tipo, texto_pagina):
-            # Limpiar el match: quitar todo antes de la letra tipo
             tipo_idx = match.rfind(tipo_config)
             if tipo_idx >= 0:
                 limpio = match[tipo_idx:]

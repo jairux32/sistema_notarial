@@ -27,8 +27,19 @@ class APIClient:
             self.offline_queue = []
 
     def _save_offline_queue(self):
-        with open(self.offline_queue_path, 'w') as f:
-            json.dump(self.offline_queue, f, indent=2)
+        import tempfile
+        dir_name = os.path.dirname(self.offline_queue_path) or '.'
+        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
+        try:
+            with os.fdopen(fd, 'w') as f:
+                json.dump(self.offline_queue, f, indent=2)
+            os.replace(tmp_path, self.offline_queue_path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def login(self, username, password):
         try:
@@ -85,6 +96,8 @@ class APIClient:
         except Exception as e:
             return False, None, str(e)
 
+    MAX_RETRIES = 3
+
     def _enqueue_offline(self, pdf_path, username, ano, mes, tipo_libro, numero_libro):
         entry = {
             'id': str(uuid.uuid4()),
@@ -95,7 +108,8 @@ class APIClient:
             'tipo_libro': tipo_libro,
             'numero_libro': numero_libro,
             'created_at': datetime.now().isoformat(),
-            'status': 'pending'
+            'status': 'pending',
+            'retries': 0
         }
         self.offline_queue.append(entry)
         self._save_offline_queue()
@@ -123,8 +137,13 @@ class APIClient:
             if success:
                 synced += 1
             else:
-                remaining.append(entry)
-                failed += 1
+                entry['retries'] = entry.get('retries', 0) + 1
+                if entry['retries'] >= self.MAX_RETRIES:
+                    entry['status'] = 'failed'
+                    failed += 1
+                else:
+                    remaining.append(entry)
+                    failed += 1
 
         self.offline_queue = remaining
         self._save_offline_queue()

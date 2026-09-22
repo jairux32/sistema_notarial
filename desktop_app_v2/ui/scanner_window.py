@@ -52,6 +52,20 @@ class UploadWorker(QThread):
         self.finished.emit(success, msg or 'Completado')
 
 
+class PDFWorker(QThread):
+    finished = pyqtSignal(bool, str, str)
+
+    def __init__(self, images, pdf_path):
+        super().__init__()
+        self.images = images
+        self.pdf_path = pdf_path
+
+    def run(self):
+        from services.pdf_generator import generate_searchable_pdf
+        success, error = generate_searchable_pdf(self.images, self.pdf_path)
+        self.finished.emit(success, self.pdf_path, error or '')
+
+
 class ThumbnailWidget(QFrame):
     delete_clicked = pyqtSignal(str)
 
@@ -407,12 +421,17 @@ class ScannerWindow(QWidget):
 
         self.process_btn.setText("Generando PDF...")
         self.status_label.setText("Generando PDF con OCR...")
-
-        from services.pdf_generator import generate_searchable_pdf
+        self.process_btn.setEnabled(False)
 
         pdf_path = os.path.join(self.temp_dir, f'scan_{uuid.uuid4().hex[:8]}.pdf')
-        success, error = generate_searchable_pdf(self.images, pdf_path)
+        self._pending_pdf_path = pdf_path
+        self._pending_tipo_code = tipo_code
 
+        self.pdf_worker = PDFWorker(self.images, pdf_path)
+        self.pdf_worker.finished.connect(self._on_pdf_generated)
+        self.pdf_worker.start()
+
+    def _on_pdf_generated(self, success, pdf_path, error):
         if not success:
             self.process_btn.setEnabled(True)
             self.process_btn.setText("Procesar y Subir")
@@ -428,7 +447,7 @@ class ScannerWindow(QWidget):
             self.user_data.get('username', 'admin'),
             str(self.ano_spin.value()),
             self.mes_combo.currentText(),
-            tipo_code,
+            self._pending_tipo_code,
             self.numero_spin.value()
         )
         self.upload_worker.finished.connect(self._on_process_result)
