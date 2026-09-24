@@ -19,7 +19,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y tesseract-ocr tesseract-ocr-spa tesseract-ocr-eng libgl1
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-spa tesseract-ocr-eng libgl1 libglib2.0-0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -30,8 +30,30 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Run tests (stop on first failure)
-        run: python -m pytest tests/ -v --tb=short -x
+      - name: Import smoke check
+        run: |
+          python - <<'PY'
+          import importlib.util, sys, traceback
+          try:
+              import fitz, flask, pytesseract
+              spec = importlib.util.spec_from_file_location("_flask_app", "app.py")
+              mod = importlib.util.module_from_spec(spec)
+              spec.loader.exec_module(mod)
+              print("imports OK", flush=True)
+          except Exception:
+              traceback.print_exc()
+              sys.exit(1)
+          PY
 
-      - name: Run all tests
-        run: python -m pytest tests/ -v --tb=short
+      - name: Run tests
+        run: |
+          set +e
+          python -m pytest tests/ -v --tb=short -x 2>&1 | tee pytest-out.txt
+          code=${PIPESTATUS[0]}
+          {
+            echo "## Pytest (exit $code)"
+            echo '```'
+            tail -n 150 pytest-out.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $code
