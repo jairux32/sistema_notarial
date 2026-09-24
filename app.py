@@ -81,6 +81,15 @@ app.config['SCANNED_ARCHIVE_FOLDER'] = os.getenv('SCANNED_ARCHIVE_FOLDER', 'scan
 app.config['SCANNED_PREVIEW_FOLDER'] = os.getenv('SCANNED_PREVIEW_FOLDER', 'scanned_preview/')
 app.config['ESCANEO_SEPARADO_FOLDER'] = os.getenv('ESCANEO_SEPARADO_FOLDER', 'escaneo_separado/')
 
+# Asegurar carpetas base (checkout limpio / primera ejecución)
+for _folder_key in ('UPLOAD_FOLDER', 'PROCESSED_FOLDER', 'SCANNED_FOLDER',
+                    'SCANNED_ARCHIVE_FOLDER', 'SCANNED_PREVIEW_FOLDER',
+                    'ESCANEO_SEPARADO_FOLDER'):
+    try:
+        os.makedirs(app.config[_folder_key], exist_ok=True)
+    except OSError:
+        pass
+
 # Inicializar base de datos
 db.init_app(app)
 migrate = Migrate(app, db)
@@ -612,6 +621,7 @@ def agregar_codigo_manual():
 @login_required
 def documentos_lista():
     processed_folder = app.config['PROCESSED_FOLDER']
+    os.makedirs(processed_folder, exist_ok=True)
     anio = request.args.get('anio', type=int)
     tipo = request.args.get('tipo')
     

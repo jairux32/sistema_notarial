@@ -66,6 +66,12 @@ def app_instance():
     _flask_app.config['WTF_CSRF_ENABLED'] = False
     _flask_app.config['LOGIN_DISABLED'] = True
 
+    # Clean checkouts may lack processed/ (gitignored without .gitkeep)
+    for key in ('UPLOAD_FOLDER', 'PROCESSED_FOLDER', 'SCANNED_FOLDER',
+                'SCANNED_ARCHIVE_FOLDER', 'SCANNED_PREVIEW_FOLDER',
+                'ESCANEO_SEPARADO_FOLDER'):
+        os.makedirs(_flask_app.config[key], exist_ok=True)
+
     with _flask_app.app_context():
         from models import db
         db.create_all()
