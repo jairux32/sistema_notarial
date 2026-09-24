@@ -32,28 +32,41 @@ jobs:
 
       - name: Import smoke check
         run: |
-          python - <<'PY'
-          import importlib.util, sys, traceback
-          try:
-              import fitz, flask, pytesseract
-              spec = importlib.util.spec_from_file_location("_flask_app", "app.py")
-              mod = importlib.util.module_from_spec(spec)
-              spec.loader.exec_module(mod)
-              print("imports OK", flush=True)
-          except Exception:
-              traceback.print_exc()
-              sys.exit(1)
-          PY
+          python -c "import fitz, flask, pytesseract; import importlib.util; s=importlib.util.spec_from_file_location('_flask_app','app.py'); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); print('imports OK')"
 
       - name: Run tests
+        shell: bash
         run: |
           set +e
-          python -m pytest tests/ -v --tb=short -x 2>&1 | tee pytest-out.txt
-          code=${PIPESTATUS[0]}
-          {
-            echo "## Pytest (exit $code)"
-            echo '```'
-            tail -n 150 pytest-out.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit $code
+          python -m pytest tests/ -v --tb=short -x > pytest-out.txt 2>&1
+          code=$?
+          cat pytest-out.txt
+
+          # Visible en la API de annotations sin descargar logs
+          if [ "$code" -ne 0 ]; then
+            echo "::error::pytest failed with exit code ${code}"
+            # Las últimas líneas relevantes como error annotations
+            grep -E 'FAILED|ERROR|Error|assert |E   |short test summary|exit' pytest-out.txt | tail -n 30 | while IFS= read -r line; do
+              line_flat=${line//$'\n'/ }
+              echo "::error::${line_flat}"
+            done
+          fi
+
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            {
+              echo "## Pytest (exit ${code})"
+              echo '```'
+              tail -n 200 pytest-out.txt
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+          exit "${code}"
+
+      - name: Upload pytest log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-log
+          path: pytest-out.txt
+          if-no-files-found: ignore
