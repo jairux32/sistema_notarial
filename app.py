@@ -95,8 +95,12 @@ csrf = CSRFProtect(app)
 # Rate limiting
 limiter = Limiter(get_remote_address, app=app, default_limits=["200 per day"])
 
-# Upload size limit (100MB)
-app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
+# Upload size limit (500MB)
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
+
+@app.errorhandler(413)
+def too_large(e):
+    return jsonify({'error': 'El archivo es demasiado grande (máximo 500MB)'}), 413
 
 @app.after_request
 def set_security_headers(response):
