@@ -76,3 +76,4 @@ config_local.py
 
 # Archivos de auditoría con datos sensibles
 auditoria.json
+.venv-lotes/

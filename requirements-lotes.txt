@@ -1,0 +1,6 @@
+# Motor por lotes (lotes/): dependencias mínimas, sin Flask ni base de datos.
+PyMuPDF>=1.25
+zxing-cpp>=2.3
+Pillow>=11
+numpy>=1.26
+pytest>=8
