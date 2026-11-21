@@ -20,11 +20,12 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-from . import antiguos, informe as inf
+from . import analisis, antiguos, informe as inf
 from .aplicar import Bloqueado
 from .deteccion import detectar_pdf
 from .division import ArchivoGenerado, dividir, puede_borrar_original, verificar
 from .espacio import Espacio, carpeta_destino
+from .codigos import NOTARIA_PROPIA, parse_codigo
 from .reglas import Resultado, armar_actos, secuenciales_validos
 from .rutas import parse_ruta
 
@@ -56,9 +57,29 @@ def _serie_de(args, pdf: Path) -> tuple[int, str] | None:
     return (anio, tipo) if anio is not None and tipo else None
 
 
-def _analizar(pdf: Path, anio: int, tipo: str, ultimo_previo, dpi: int, siguientes=None, leido=None) -> Resultado:
-    total, det = leido or detectar_pdf(pdf, dpi=dpi, usar_texto=True)
-    return armar_actos(det, total, anio, tipo, ultimo_previo=ultimo_previo, siguientes=siguientes)
+def _analizar(pdf: Path, anio: int, tipo: str, ultimo_previo, dpi: int, siguientes=None, leido=None,
+              manuales=None, recuperar: bool = True) -> Resultado:
+    return analisis.analizar(pdf, anio, tipo, ultimo_previo=ultimo_previo, siguientes=siguientes, dpi=dpi,
+                             manuales=manuales, recuperar=recuperar, leido=leido)
+
+
+def _manuales(items, anio: int, tipo: str) -> dict[int, str]:
+    """`--codigo-manual 769=1181` (o con el código entero): {hoja: código}. Falla con un mensaje claro si no sirve."""
+    salida: dict[int, str] = {}
+    for item in items or []:
+        try:
+            hoja_txt, cod_txt = item.split("=", 1)
+            hoja = int(hoja_txt)
+        except ValueError:
+            raise ValueError(f"«{item}»: use HOJA=CÓDIGO, por ejemplo 769=1181") from None
+        cod_txt = cod_txt.strip()
+        if cod_txt.isdigit() and len(cod_txt) <= 5:
+            cod_txt = f"{anio}{NOTARIA_PROPIA}{tipo}{int(cod_txt):05d}"
+        cod = parse_codigo(cod_txt)
+        if hoja < 1 or cod is None or cod.notaria != NOTARIA_PROPIA or cod.anio != anio or cod.tipo != tipo:
+            raise ValueError(f"«{item}»: debe ser una hoja y un código de la Notaría Séptima, año {anio}, tipo {tipo}")
+        salida[hoja] = cod.texto
+    return salida
 
 
 def _resumen_resultado(res: Resultado) -> list[str]:
@@ -142,8 +163,13 @@ def cmd_simular(args) -> int:
     serie = _serie_de(args, pdf)
     if not serie:
         return _error("indique --anio y --tipo (o --raiz para sacarlos de la ruta)")
+    try:
+        manuales = _manuales(args.codigo_manual, serie[0], serie[1])
+    except ValueError as e:
+        return _error(str(e))
     _bajar_prioridad(args.nice)
-    res = _analizar(pdf, serie[0], serie[1], args.ultimo_previo, args.dpi)
+    res = _analizar(pdf, serie[0], serie[1], args.ultimo_previo, args.dpi, manuales=manuales,
+                    recuperar=not args.sin_recuperar)
     print(f"SIMULACIÓN (no se escribió nada) — {pdf.name} · {res.total_paginas} páginas · serie {serie[0]} {serie[1]}")
     print("\n".join(_resumen_resultado(res)))
     if res.ajenos:
@@ -189,7 +215,7 @@ def cmd_serie(args) -> int:
         # Se lee también el libro que sigue: su comienzo permite reconocer un código suelto al final de este.
         siguiente = detectar_pdf(libros[i + 1][1], dpi=args.dpi, usar_texto=True) if i + 1 < len(libros) else None
         sig = secuenciales_validos(siguiente[1], args.anio, tipo) if siguiente else None
-        res = _analizar(p, args.anio, tipo, ultimo, args.dpi, siguientes=sig, leido=leido)
+        res = _analizar(p, args.anio, tipo, ultimo, args.dpi, siguientes=sig, leido=leido, recuperar=not args.sin_recuperar)
         leido = siguiente
         marca = "REVISAR" if res.requiere_revision else "ok"
         rango = (f"{res.actos[0].codigo.secuencial:05d}–{res.actos[-1].codigo.secuencial:05d}" if res.actos else "sin actos")
@@ -217,10 +243,15 @@ def cmd_dividir(args) -> int:
     prep = Path(args.preparacion) if args.preparacion else pdf.parent / f"_division_{pdf.stem}"
     if prep.exists() and any(prep.iterdir()):
         return _error(f"la carpeta de preparación {prep} ya existe y no está vacía: no se sobrescribe")
+    try:
+        manuales = _manuales(args.codigo_manual, serie[0], serie[1])
+    except ValueError as e:
+        return _error(str(e))
     _bajar_prioridad(args.nice)
     st0 = pdf.stat()
     sha0 = inf.sha256_archivo(pdf)
-    res = _analizar(pdf, serie[0], serie[1], args.ultimo_previo, args.dpi)
+    res = _analizar(pdf, serie[0], serie[1], args.ultimo_previo, args.dpi, manuales=manuales,
+                    recuperar=not args.sin_recuperar)
     if not res.actos:
         print("No se encontró ningún código de acto en el libro: no se divide (revise la simulación).")
         return 1
@@ -263,6 +294,10 @@ def cmd_aplicar_libro(args) -> int:
         anio, tipo, mes, libro_p = antiguos.deducir(esp, pdf)
     except ValueError as e:
         return _error(f"no se pudo ubicar el libro en el archivo: {e}")
+    try:
+        manuales = _manuales(args.codigo_manual, anio, tipo)
+    except ValueError as e:
+        return _error(str(e))
     mes, libro = args.mes or mes, args.libro or libro_p
     if mes is None or libro is None:
         return _error("no se pudo deducir el " + ("mes" if mes is None else "número de libro")
@@ -282,7 +317,8 @@ def cmd_aplicar_libro(args) -> int:
     _bajar_prioridad(args.nice)
 
     if not args.si:
-        res = _analizar(pdf, anio, tipo, args.ultimo_previo, args.dpi, siguientes=siguientes)
+        res = _analizar(pdf, anio, tipo, args.ultimo_previo, args.dpi, siguientes=siguientes, manuales=manuales,
+                        recuperar=not args.sin_recuperar)
         print(f"PLAN (no se escribió nada) — {pdf.name} · {res.total_paginas} páginas · serie {anio} {tipo}")
         print(f"Los actos se colocarían en: {destino}")
         print(f"El original se apartaría en: {esp.espera / 'originales' / antiguos._relativa(esp, pdf)}")
@@ -296,7 +332,8 @@ def cmd_aplicar_libro(args) -> int:
 
     esp.asegurar()
     try:
-        info = antiguos.preparar(esp, pdf, anio, tipo, args.ultimo_previo, siguientes, args.dpi)
+        info = antiguos.preparar(esp, pdf, anio, tipo, args.ultimo_previo, siguientes, args.dpi, manuales=manuales,
+                                 recuperar=not args.sin_recuperar, rehacer=bool(manuales))
     except ValueError as e:
         return _error(str(e))
     if info.get("sin_actos"):
@@ -376,6 +413,10 @@ def _parser() -> argparse.ArgumentParser:
         sp.add_argument("--nice", type=int, default=10, help="baja la prioridad del proceso (0 = normal)")
         if pdf:
             sp.add_argument("--raiz", help="raíz del archivo, para deducir año y tipo de la ruta del PDF")
+            sp.add_argument("--codigo-manual", action="append", metavar="HOJA=CÓDIGO",
+                            help="código de una hoja que el programa no leyó, p. ej. 769=1181 (se puede repetir)")
+        sp.add_argument("--sin-recuperar", action="store_true",
+                        help="no volver a leer con más esfuerzo las hojas de los huecos de numeración")
 
     s = sub.add_parser("inventario", help="cuenta lo que hay por año y tipo")
     s.add_argument("raiz")
@@ -395,6 +436,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--ultimo-previo", type=int, default=None)
     s.add_argument("--dpi", type=int, default=200)
     s.add_argument("--nice", type=int, default=10)
+    s.add_argument("--sin-recuperar", action="store_true", help="no volver a leer con más esfuerzo las hojas de los huecos")
     s.set_defaults(f=cmd_serie)
 
     s = sub.add_parser("dividir", help="corta un libro en una carpeta de preparación y la verifica")
@@ -413,6 +455,9 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--auto-siguiente", action="store_true", help="lee también el libro que sigue para reconocer un suelto al final")
     s.add_argument("--si", action="store_true", help="ejecuta de verdad (sin esto solo muestra el plan)")
     s.add_argument("--aceptar-revision", action="store_true", help="coloca aunque el libro tenga huecos, avisos u hojas sin código")
+    s.add_argument("--codigo-manual", action="append", metavar="HOJA=CÓDIGO",
+                   help="código de una hoja que el programa no leyó, p. ej. 769=1181 (se puede repetir)")
+    s.add_argument("--sin-recuperar", action="store_true", help="no volver a leer con más esfuerzo las hojas de los huecos")
     s.add_argument("--dpi", type=int, default=200)
     s.add_argument("--nice", type=int, default=10)
     s.set_defaults(f=cmd_aplicar_libro)

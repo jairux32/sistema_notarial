@@ -23,10 +23,9 @@ from pathlib import Path
 
 from . import informe as inf
 from .aplicar import Bloqueado, _copiar_sin_pisar
-from .deteccion import detectar_pdf
+from . import analisis
 from .division import ArchivoGenerado, Verificacion, dividir, puede_borrar_original, verificar
 from .espacio import Espacio, carpeta_destino
-from .reglas import armar_actos
 from .rutas import numeros, parse_ruta
 
 _ANIO = re.compile(r"(19|20)\d{2}")
@@ -50,7 +49,8 @@ def _relativa(espacio: Espacio, pdf: Path) -> str:
 
 
 def preparar(espacio: Espacio, pdf: Path, anio: int, tipo: str, ultimo_previo: int | None = None,
-             siguientes: list[int] | None = None, dpi: int = 200, rehacer: bool = False) -> dict:
+             siguientes: list[int] | None = None, dpi: int = 200, rehacer: bool = False,
+             manuales: dict[int, str] | None = None, recuperar: bool = True) -> dict:
     """Lee los códigos del libro, corta los actos en `preparacion/<id>` y los verifica. Devuelve el informe."""
     rel = _relativa(espacio, pdf)
     lote_id = id_de(rel)
@@ -63,8 +63,8 @@ def preparar(espacio: Espacio, pdf: Path, anio: int, tipo: str, ultimo_previo: i
         shutil.rmtree(prep)  # solo la preparación derivada
     st0 = pdf.stat()
     sha0 = inf.sha256_archivo(pdf)
-    total, det = detectar_pdf(pdf, dpi=dpi, usar_texto=True)
-    res = armar_actos(det, total, anio, tipo, ultimo_previo=ultimo_previo, siguientes=siguientes)
+    res = analisis.analizar(pdf, anio, tipo, ultimo_previo=ultimo_previo, siguientes=siguientes, dpi=dpi,
+                            manuales=manuales, recuperar=recuperar)
     if not res.actos:
         return {"sin_actos": True, "anio": anio, "tipo": tipo, "original": {"ruta": str(pdf)},
                 "resultado": inf.resultado_a_dict(res)}

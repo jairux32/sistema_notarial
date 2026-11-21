@@ -56,6 +56,8 @@ class Resultado:
     saltos: list[str]  # huecos de numeración: «faltan 00011–00012 antes de 00013»
     avisos: list[str]
     ultimo_secuencial: int | None
+    # (primer número que falta, último, primera hoja donde puede estar, última hoja): sirve para buscar ahí con más esfuerzo
+    huecos: list[tuple[int, int, int, int]] = field(default_factory=list)
 
     @property
     def requiere_revision(self) -> bool:
@@ -149,13 +151,21 @@ def armar_actos(
     ultimo_previo: int | None = None,
     notaria: str = NOTARIA_PROPIA,
     siguientes: list[int] | None = None,
+    manuales: dict[int, str] | None = None,
+    recuperados: dict[int, str] | None = None,
 ) -> Resultado:
     """Arma los actos de un libro.
 
     `anio` y `tipo` (P/D/C/A/O) vienen de la carpeta. `ultimo_previo` es el último secuencial del libro anterior de la
     misma serie (año+tipo); None si es el primer libro que se procesa de esa serie. `siguientes` son los secuenciales
     del comienzo del libro que sigue (ver `secuenciales_validos`), solo para reconocer códigos sueltos al final.
+    `manuales` {hoja: código} lo puso una persona y manda sobre lo leído; `recuperados` los halló una segunda lectura con más
+    esfuerzo en el hueco de la numeración (dejan el libro para revisión).
     """
+    corregidas = {**(recuperados or {}), **(manuales or {})}
+    if corregidas:
+        detecciones = [d for d in detecciones if d.pagina not in corregidas] + [
+            DeteccionPagina(pagina=p, barras=(t,)) for p, t in corregidas.items()]
     por_pagina = {d.pagina: d for d in detecciones}
 
     # Orden de la numeración: qué páginas siguen la cadena creciente y cuáles traen un código suelto fuera de ella.
@@ -171,7 +181,7 @@ def armar_actos(
     actos: list[Acto] = []
     ajenos: list[tuple[int, str, str]] = []
     saltos: list[str] = []
-    huecos: list[tuple[int, int]] = []  # (desde, hasta) de cada salto, para decir dónde aparecen esos números
+    huecos: list[tuple[int, int, int, int]] = []  # (desde, hasta, hoja inicial, hoja final) de cada salto
     avisos: list[str] = []
 
     for pagina in range(1, total_paginas + 1):
@@ -227,7 +237,7 @@ def armar_actos(
                 else f"{ultimo + 1:05d}–{cod.secuencial - 1:05d}"
             )
             saltos.append(f"faltan {faltan} antes de {cod.texto} (página {pagina})")
-            huecos.append((ultimo + 1, cod.secuencial - 1))
+            huecos.append((ultimo + 1, cod.secuencial - 1, (actos[-1].inicio + 1) if actos else 1, pagina - 1))
 
         actos.append(Acto(cod, inicio=pagina, fin=total_paginas, confianza=confianza, avisos=aviso_acto))
         ultimo = cod.secuencial
@@ -240,7 +250,7 @@ def armar_actos(
             c = parse_codigo(texto)
             if c and c.notaria == notaria and c.anio == anio and c.tipo == tipo:
                 presentes.setdefault(c.secuencial, []).append(p)
-        for k, (desde, hasta) in enumerate(huecos):
+        for k, (desde, hasta, _, _) in enumerate(huecos):
             donde = [f"el {n:05d} aparece en la página {presentes[n][0]}, fuera de orden"
                      for n in range(desde, hasta + 1) if n in presentes][:5]
             if donde:
@@ -248,6 +258,15 @@ def armar_actos(
 
     for i, acto in enumerate(actos[:-1]):
         acto.fin = actos[i + 1].inicio - 1
+
+    for acto in actos:
+        if acto.inicio in (manuales or {}):
+            acto.avisos.append(f"el código de la hoja {acto.inicio} lo puso una persona")
+        elif acto.inicio in (recuperados or {}):
+            msg = (f"hoja {acto.inicio}: el código {acto.codigo.texto} se recuperó leyendo la hoja con más esfuerzo "
+                   f"(el primer paso no lo leyó); confirme que es correcto")
+            acto.avisos.append(msg)
+            avisos.append(msg)
 
     huerfanas = (1, actos[0].inicio - 1) if actos and actos[0].inicio > 1 else None
     if not actos and total_paginas:
@@ -262,4 +281,5 @@ def armar_actos(
         saltos=saltos,
         avisos=avisos,
         ultimo_secuencial=ultimo,
+        huecos=huecos,
     )
