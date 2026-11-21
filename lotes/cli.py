@@ -22,7 +22,7 @@ from pathlib import Path
 from . import informe as inf
 from .deteccion import detectar_pdf
 from .division import ArchivoGenerado, dividir, puede_borrar_original, verificar
-from .reglas import Resultado, armar_actos
+from .reglas import Resultado, armar_actos, secuenciales_validos
 from .rutas import parse_ruta
 
 GIB = 1024 ** 3
@@ -53,9 +53,9 @@ def _serie_de(args, pdf: Path) -> tuple[int, str] | None:
     return (anio, tipo) if anio is not None and tipo else None
 
 
-def _analizar(pdf: Path, anio: int, tipo: str, ultimo_previo, dpi: int) -> Resultado:
-    total, det = detectar_pdf(pdf, dpi=dpi, usar_texto=True)
-    return armar_actos(det, total, anio, tipo, ultimo_previo=ultimo_previo)
+def _analizar(pdf: Path, anio: int, tipo: str, ultimo_previo, dpi: int, siguientes=None, leido=None) -> Resultado:
+    total, det = leido or detectar_pdf(pdf, dpi=dpi, usar_texto=True)
+    return armar_actos(det, total, anio, tipo, ultimo_previo=ultimo_previo, siguientes=siguientes)
 
 
 def _resumen_resultado(res: Resultado) -> list[str]:
@@ -175,8 +175,13 @@ def cmd_serie(args) -> int:
     ultimo = args.ultimo_previo
     print(f"SERIE {args.anio} {tipo}: {len(libros)} PDF en orden (no se escribe nada)")
     pendientes = 0
-    for _, p, r in libros:
-        res = _analizar(p, args.anio, tipo, ultimo, args.dpi)
+    leido = detectar_pdf(libros[0][1], dpi=args.dpi, usar_texto=True)
+    for i, (_, p, r) in enumerate(libros):
+        # Se lee también el libro que sigue: su comienzo permite reconocer un código suelto al final de este.
+        siguiente = detectar_pdf(libros[i + 1][1], dpi=args.dpi, usar_texto=True) if i + 1 < len(libros) else None
+        sig = secuenciales_validos(siguiente[1], args.anio, tipo) if siguiente else None
+        res = _analizar(p, args.anio, tipo, ultimo, args.dpi, siguientes=sig, leido=leido)
+        leido = siguiente
         marca = "REVISAR" if res.requiere_revision else "ok"
         rango = (f"{res.actos[0].codigo.secuencial:05d}–{res.actos[-1].codigo.secuencial:05d}" if res.actos else "sin actos")
         print(f"  [{marca:>7}] {r.relativa}: {res.total_paginas} pág., {len(res.actos)} actos ({rango})")

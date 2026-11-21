@@ -209,3 +209,12 @@ def test_dividir_avisa_si_el_original_cambia_mientras_se_divide(raiz, capsys, mo
     monkeypatch.setattr(cli, "dividir", dividir_y_tocar)
     rc, out, _ = _ejecutar(capsys, "dividir", pdf, "--raiz", raiz)
     assert rc == 1 and "cambió mientras se dividía" in out
+
+
+def test_serie_no_pierde_el_libro_siguiente_por_un_codigo_suelto_al_final_del_anterior(raiz, capsys):
+    base = raiz / str(A) / f"PROTOCOLOS {A}" / "3. Marzo"
+    crear_libro(base / "libro1" / "l1.pdf", [_pag(1), _pag(), _pag(2), _pag(), _pag(90)])   # el 90 está suelto
+    crear_libro(base / "libro2" / "l2.pdf", [_pag(3), _pag(), _pag(4)])
+    rc, out, _ = _ejecutar(capsys, "serie", raiz, "--anio", A, "--tipo", "P")
+    assert "l2.pdf: 3 pág., 2 actos (00003–00004)" in out          # antes salía «sin actos»
+    assert "fuera de orden" in out and rc == 1                      # y el suelto queda a la vista

@@ -10,6 +10,11 @@ Reglas (decididas con la notaría, 19-nov-2026):
   · Los habilitantes de la propia notaría SÍ traen código 1101007, y son frecuentes. Como son documentos ya emitidos,
     casi siempre llevan un año anterior, otra letra o un secuencial menor. Un acto nuevo exige: mismo año y mismo tipo
     que el libro, y un secuencial MAYOR que el último acto abierto. Lo demás se anota como habilitante propio.
+  · Un código con número MUY ADELANTADO que aparece suelto (la numeración sigue sin él) no abre acto: si se tomara como
+    bueno, haría descartar como «habilitantes» todos los actos reales que vienen después (medido en 2026: un `…00260`
+    suelto en la hoja 1013 dejó dos libros enteros «sin actos»). Se decide mirando la secuencia completa del libro (y
+    el comienzo del libro siguiente, si se conoce): se conserva la cadena creciente más larga y lo demás se anota
+    como «fuera de orden» y deja el libro para revisión.
   · Nada se pierde en silencio: las páginas anteriores al primer código se conservan como «huérfanas», y cualquier
     salto de numeración, conflicto o duda deja el libro «para revisión» (los originales no se borran).
 """
@@ -87,6 +92,55 @@ def _candidatos(d: DeteccionPagina) -> dict[str, tuple[Codigo, set[str]]]:
     return res
 
 
+def _representante(d: DeteccionPagina, anio: int, tipo: str, notaria: str) -> Codigo | None:
+    """El código que esa página propondría como acto (de la notaría, año y tipo del libro), sin mirar el orden."""
+    validos = [(c, f) for c, f in _candidatos(d).values() if c.notaria == notaria and c.anio == anio and c.tipo == tipo]
+    if not validos:
+        return None
+    con_barras = [v for v in validos if "barras" in v[1]]
+    return min((con_barras or validos), key=lambda v: v[0].secuencial)[0]
+
+
+def secuenciales_validos(detecciones: list[DeteccionPagina], anio: int, tipo: str, notaria: str = NOTARIA_PROPIA) -> list[int]:
+    """Secuenciales que propone cada página (en orden de página). Sirve para dejar ver el comienzo del libro siguiente."""
+    reps = (_representante(d, anio, tipo, notaria) for d in sorted(detecciones, key=lambda d: d.pagina))
+    return [r.secuencial for r in reps if r]
+
+
+def _cadena_creciente(elementos: list[tuple[int | None, int]]) -> set[int]:
+    """Páginas de la cadena estrictamente creciente más larga de `elementos` = [(página o None, secuencial)].
+
+    Entre cadenas igual de largas gana la más «apretada» (menor último − primero: la que sigue la numeración sin saltos);
+    entre repetidos, el primero. El último secuencial del libro anterior entra como primer elemento (página 0), así que la
+    cadena lo sigue a él.
+    Los elementos con página None (del libro siguiente) o 0 (el ancla) cuentan para decidir pero no se devuelven.
+    """
+    n = len(elementos)
+    if n == 0:
+        return set()
+    largo = [1] * n
+    ultimo = [elementos[i][1] for i in range(n)]  # secuencial final de la mejor cadena que empieza en i
+    siguiente = [-1] * n
+    for i in range(n - 1, -1, -1):
+        mejor = -1
+        for j in range(i + 1, n):
+            if elementos[j][1] <= elementos[i][1]:
+                continue
+            if mejor < 0 or (largo[j], -ultimo[j]) > (largo[mejor], -ultimo[mejor]):
+                mejor = j
+        if mejor >= 0:
+            largo[i], ultimo[i], siguiente[i] = 1 + largo[mejor], ultimo[mejor], mejor
+    inicio = min(range(n), key=lambda i: (-largo[i], ultimo[i] - elementos[i][1], i))
+    paginas: set[int] = set()
+    i = inicio
+    while i >= 0:
+        pag = elementos[i][0]
+        if pag:
+            paginas.add(pag)
+        i = siguiente[i]
+    return paginas
+
+
 def armar_actos(
     detecciones: list[DeteccionPagina],
     total_paginas: int,
@@ -94,13 +148,25 @@ def armar_actos(
     tipo: str,
     ultimo_previo: int | None = None,
     notaria: str = NOTARIA_PROPIA,
+    siguientes: list[int] | None = None,
 ) -> Resultado:
     """Arma los actos de un libro.
 
     `anio` y `tipo` (P/D/C/A/O) vienen de la carpeta. `ultimo_previo` es el último secuencial del libro anterior de la
-    misma serie (año+tipo); None si es el primer libro que se procesa de esa serie.
+    misma serie (año+tipo); None si es el primer libro que se procesa de esa serie. `siguientes` son los secuenciales
+    del comienzo del libro que sigue (ver `secuenciales_validos`), solo para reconocer códigos sueltos al final.
     """
     por_pagina = {d.pagina: d for d in detecciones}
+
+    # Orden de la numeración: qué páginas siguen la cadena creciente y cuáles traen un código suelto fuera de ella.
+    elementos: list[tuple[int | None, int]] = [(0, ultimo_previo)] if ultimo_previo is not None else []
+    for d in sorted(detecciones, key=lambda d: d.pagina):
+        r = _representante(d, anio, tipo, notaria)
+        if r and (ultimo_previo is None or r.secuencial > ultimo_previo):
+            elementos.append((d.pagina, r.secuencial))
+    extra = [(None, s) for s in (siguientes or []) if ultimo_previo is None or s > ultimo_previo]
+    en_cadena = _cadena_creciente(elementos + extra)
+    fuera_de_orden = {p for p, _ in elementos if p and p not in en_cadena}
     ultimo = ultimo_previo
     actos: list[Acto] = []
     ajenos: list[tuple[int, str, str]] = []
@@ -112,6 +178,7 @@ def armar_actos(
         if d is None:
             continue
         validos: list[tuple[Codigo, set[str]]] = []
+        suelto = False
         for texto, (cod, fuentes) in _candidatos(d).items():
             if cod.notaria != notaria:
                 ajenos.append((pagina, texto, "otra notaría"))
@@ -125,8 +192,13 @@ def armar_actos(
                 ajenos.append(
                     (pagina, texto, f"secuencial {cod.secuencial:05d} no supera al último ({ultimo:05d}): habilitante propio")
                 )
+            elif pagina in fuera_de_orden:
+                ajenos.append((pagina, texto, "fuera de orden: la numeración sigue sin él; se trató como habilitante propio"))
+                suelto = True
             else:
                 validos.append((cod, fuentes))
+        if suelto:
+            avisos.append(f"página {pagina}: hay un código fuera de orden (no se tomó como acto nuevo); confirme que es un habilitante")
         if not validos:
             continue
 

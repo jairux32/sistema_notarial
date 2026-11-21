@@ -80,3 +80,12 @@ def test_orden_natural_de_los_libros():
     )]
     orden = [r.libro for r in sorted(rutas, key=lambda r: r.orden)]
     assert orden == ["Libro88", "libro89", "LIBRO99", "LIBRO100"]   # 99 antes que 100 (no por texto)
+
+
+def test_orden_por_el_numero_del_nombre_aunque_haya_erratas():
+    nombres = ["dili 4 julio 2026.pdf", "dilli 3 julio 2026.pdf", "dili 1 julio 2026.pdf", "dili 2 julio 2026.pdf"]
+    rutas = [parse_ruta(f"2026/DILIGENCIAS/Julio/{n}") for n in nombres]
+    assert [r.archivo[:7] for r in sorted(rutas, key=lambda r: r.orden)] == ["dili 1 ", "dili 2 ", "dilli 3", "dili 4 "]
+    mezcla = [parse_ruta(f"2025/PROTOCOLOS/Febrero/{n}") for n in ("proto 3 febrero 2025.pdf", "prot 4 febrero 2025.pdf",
+                                                                    "prot 1 febrero 2025.pdf", "proto 5 febrero 2025.pdf")]
+    assert [r.archivo.split()[1] for r in sorted(mezcla, key=lambda r: r.orden)] == ["1", "3", "4", "5"]
