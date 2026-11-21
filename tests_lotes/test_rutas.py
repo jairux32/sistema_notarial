@@ -89,3 +89,13 @@ def test_orden_por_el_numero_del_nombre_aunque_haya_erratas():
     mezcla = [parse_ruta(f"2025/PROTOCOLOS/Febrero/{n}") for n in ("proto 3 febrero 2025.pdf", "prot 4 febrero 2025.pdf",
                                                                     "prot 1 febrero 2025.pdf", "proto 5 febrero 2025.pdf")]
     assert [r.archivo.split()[1] for r in sorted(mezcla, key=lambda r: r.orden)] == ["1", "3", "4", "5"]
+
+
+def test_sin_carpeta_de_mes_el_nombre_del_archivo_marca_el_orden():
+    nombres = ["ARRIENDOS JULIO - DICIEMBRE 2025.pdf", "ARRIENDOS MAYO - JUNIO 2025.pdf", "ARRIENDOS ENERO - ABRIL 2025.pdf"]
+    rutas = [parse_ruta(f"2025/ARRIENDOS/{n}") for n in nombres]
+    assert [r.archivo.split()[1] for r in sorted(rutas, key=lambda r: r.orden)] == ["ENERO", "MAYO", "JULIO"]
+    # con carpeta de mes, manda la carpeta
+    a = parse_ruta("2025/OTROS/Marzo/otros mayo 2025.pdf")
+    b = parse_ruta("2025/OTROS/Abril/otros enero 2025.pdf")
+    assert a.orden < b.orden

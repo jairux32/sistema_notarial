@@ -4,6 +4,7 @@
     simular PDF            analiza un libro y muestra qué actos encontraría; no escribe nada
     serie RAIZ             simula todos los libros de un año+tipo en orden, encadenando la numeración; no escribe nada
     dividir PDF            corta el libro en una carpeta de PREPARACIÓN, la verifica y guarda el informe (no toca el original)
+    corregir PDF HOJA=CÓDIGO   anota lo que una persona confirmó mirando el libro (se aplica solo en los análisis siguientes)
     aplicar-libro PDF      divide un libro VIEJO y coloca cada acto en su carpeta (con --si); el original se aparta, no se borra
     verificar CARPETA      vuelve a comprobar una preparación contra el original y las sumas guardadas
     informe CARPETA        muestra el informe guardado
@@ -20,7 +21,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-from . import analisis, antiguos, informe as inf
+from . import analisis, antiguos, correcciones, informe as inf
 from .aplicar import Bloqueado
 from .deteccion import detectar_pdf
 from .division import ArchivoGenerado, dividir, puede_borrar_original, verificar
@@ -61,6 +62,26 @@ def _analizar(pdf: Path, anio: int, tipo: str, ultimo_previo, dpi: int, siguient
               manuales=None, recuperar: bool = True) -> Resultado:
     return analisis.analizar(pdf, anio, tipo, ultimo_previo=ultimo_previo, siguientes=siguientes, dpi=dpi,
                              manuales=manuales, recuperar=recuperar, leido=leido)
+
+
+def _manuales_guardados(corr: dict, relativa: str, anio: int, tipo: str) -> dict[int, str]:
+    """Las correcciones guardadas para ese PDF, validadas contra su año y tipo."""
+    return _manuales([f"{h}={t}" for h, t in corr.get(relativa, {}).items()], anio, tipo)
+
+
+def _guardadas_de_pdf(args, pdf: Path, serie) -> dict[int, str]:
+    """Para simular y dividir: solo se aplican las guardadas si se dan --correcciones y --raiz (para saber la ruta relativa)."""
+    if not getattr(args, "correcciones", None) or not getattr(args, "raiz", None):
+        return {}
+    try:
+        rel = pdf.resolve().relative_to(Path(args.raiz).resolve()).as_posix()
+    except ValueError:
+        return {}
+    return _manuales_guardados(correcciones.cargar(Path(args.correcciones)), rel, serie[0], serie[1])
+
+
+def _ruta_correcciones(args, por_omision: Path) -> Path:
+    return Path(args.correcciones) if getattr(args, "correcciones", None) else por_omision / correcciones.NOMBRE
 
 
 def _manuales(items, anio: int, tipo: str) -> dict[int, str]:
@@ -164,7 +185,7 @@ def cmd_simular(args) -> int:
     if not serie:
         return _error("indique --anio y --tipo (o --raiz para sacarlos de la ruta)")
     try:
-        manuales = _manuales(args.codigo_manual, serie[0], serie[1])
+        manuales = {**_guardadas_de_pdf(args, pdf, serie), **_manuales(args.codigo_manual, serie[0], serie[1])}
     except ValueError as e:
         return _error(str(e))
     _bajar_prioridad(args.nice)
@@ -206,6 +227,10 @@ def cmd_serie(args) -> int:
     libros = _libros_de_serie(raiz, args.anio, tipo)
     if not libros:
         return _error(f"no hay PDF de la serie {args.anio} {tipo} en {raiz}")
+    try:
+        corr = correcciones.cargar(_ruta_correcciones(args, raiz / ".separador"))
+    except ValueError as e:
+        return _error(str(e))
     _bajar_prioridad(args.nice)
     ultimo = args.ultimo_previo
     print(f"SERIE {args.anio} {tipo}: {len(libros)} PDF en orden (no se escribe nada)")
@@ -215,7 +240,12 @@ def cmd_serie(args) -> int:
         # Se lee también el libro que sigue: su comienzo permite reconocer un código suelto al final de este.
         siguiente = detectar_pdf(libros[i + 1][1], dpi=args.dpi, usar_texto=True) if i + 1 < len(libros) else None
         sig = secuenciales_validos(siguiente[1], args.anio, tipo) if siguiente else None
-        res = _analizar(p, args.anio, tipo, ultimo, args.dpi, siguientes=sig, leido=leido, recuperar=not args.sin_recuperar)
+        try:
+            manuales = _manuales_guardados(corr, r.relativa, args.anio, tipo)
+        except ValueError as e:
+            return _error(f"{r.relativa}: {e}")
+        res = _analizar(p, args.anio, tipo, ultimo, args.dpi, siguientes=sig, leido=leido, manuales=manuales,
+                        recuperar=not args.sin_recuperar)
         leido = siguiente
         marca = "REVISAR" if res.requiere_revision else "ok"
         rango = (f"{res.actos[0].codigo.secuencial:05d}–{res.actos[-1].codigo.secuencial:05d}" if res.actos else "sin actos")
@@ -244,7 +274,7 @@ def cmd_dividir(args) -> int:
     if prep.exists() and any(prep.iterdir()):
         return _error(f"la carpeta de preparación {prep} ya existe y no está vacía: no se sobrescribe")
     try:
-        manuales = _manuales(args.codigo_manual, serie[0], serie[1])
+        manuales = {**_guardadas_de_pdf(args, pdf, serie), **_manuales(args.codigo_manual, serie[0], serie[1])}
     except ValueError as e:
         return _error(str(e))
     _bajar_prioridad(args.nice)
@@ -295,7 +325,9 @@ def cmd_aplicar_libro(args) -> int:
     except ValueError as e:
         return _error(f"no se pudo ubicar el libro en el archivo: {e}")
     try:
-        manuales = _manuales(args.codigo_manual, anio, tipo)
+        guardadas = correcciones.cargar(_ruta_correcciones(args, datos))
+        manuales = {**_manuales_guardados(guardadas, antiguos._relativa(esp, pdf), anio, tipo),
+                    **_manuales(args.codigo_manual, anio, tipo)}
     except ValueError as e:
         return _error(str(e))
     mes, libro = args.mes or mes, args.libro or libro_p
@@ -348,6 +380,26 @@ def cmd_aplicar_libro(args) -> int:
         return 1
     print(f"\nCOLOCADO: {len(hecho['archivos'])} archivos en {hecho['destino']}")
     print(f"El original quedó apartado en {hecho.get('original_en_espera')} (no se borró).")
+    return 0
+
+
+# ------------------------------------------------------------------ corregir
+def cmd_corregir(args) -> int:
+    """Deja anotado, en el archivo de correcciones, lo que una persona confirmó mirando el libro: HOJA=CÓDIGO."""
+    pdf, raiz, datos = Path(args.pdf), Path(args.raiz), Path(args.datos)
+    if not pdf.is_file():
+        return _error(f"no existe {pdf}")
+    esp = Espacio(datos, raiz)
+    try:
+        anio, tipo, _, _ = antiguos.deducir(esp, pdf)
+        hojas = _manuales(args.hojas, anio, tipo)
+        if not hojas:
+            return _error("indique al menos una HOJA=CÓDIGO, por ejemplo 25=4")
+        correcciones.agregar(_ruta_correcciones(args, datos), antiguos._relativa(esp, pdf), hojas, args.nota or "")
+    except ValueError as e:
+        return _error(str(e))
+    for h, t in sorted(hojas.items()):
+        print(f"anotado: hoja {h} de {pdf.name} = {t}")
     return 0
 
 
@@ -415,6 +467,7 @@ def _parser() -> argparse.ArgumentParser:
             sp.add_argument("--raiz", help="raíz del archivo, para deducir año y tipo de la ruta del PDF")
             sp.add_argument("--codigo-manual", action="append", metavar="HOJA=CÓDIGO",
                             help="código de una hoja que el programa no leyó, p. ej. 769=1181 (se puede repetir)")
+            sp.add_argument("--correcciones", help="archivo correcciones.json (con --raiz) con lo que una persona ya confirmó")
         sp.add_argument("--sin-recuperar", action="store_true",
                         help="no volver a leer con más esfuerzo las hojas de los huecos de numeración")
 
@@ -437,6 +490,7 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--dpi", type=int, default=200)
     s.add_argument("--nice", type=int, default=10)
     s.add_argument("--sin-recuperar", action="store_true", help="no volver a leer con más esfuerzo las hojas de los huecos")
+    s.add_argument("--correcciones", help="archivo de correcciones (por omisión RAIZ/.separador/correcciones.json)")
     s.set_defaults(f=cmd_serie)
 
     s = sub.add_parser("dividir", help="corta un libro en una carpeta de preparación y la verifica")
@@ -455,12 +509,22 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--auto-siguiente", action="store_true", help="lee también el libro que sigue para reconocer un suelto al final")
     s.add_argument("--si", action="store_true", help="ejecuta de verdad (sin esto solo muestra el plan)")
     s.add_argument("--aceptar-revision", action="store_true", help="coloca aunque el libro tenga huecos, avisos u hojas sin código")
+    s.add_argument("--correcciones", help="archivo de correcciones (por omisión DATOS/correcciones.json)")
     s.add_argument("--codigo-manual", action="append", metavar="HOJA=CÓDIGO",
                    help="código de una hoja que el programa no leyó, p. ej. 769=1181 (se puede repetir)")
     s.add_argument("--sin-recuperar", action="store_true", help="no volver a leer con más esfuerzo las hojas de los huecos")
     s.add_argument("--dpi", type=int, default=200)
     s.add_argument("--nice", type=int, default=10)
     s.set_defaults(f=cmd_aplicar_libro)
+
+    s = sub.add_parser("corregir", help="anota lo que una persona confirmó de un libro (HOJA=CÓDIGO)")
+    s.add_argument("pdf")
+    s.add_argument("hojas", nargs="+", metavar="HOJA=CÓDIGO", help="p. ej. 25=4 (el número solo basta)")
+    s.add_argument("--raiz", required=True)
+    s.add_argument("--datos", required=True)
+    s.add_argument("--nota", help="de dónde sale la corrección (queda escrita)")
+    s.add_argument("--correcciones", help="archivo de correcciones (por omisión DATOS/correcciones.json)")
+    s.set_defaults(f=cmd_corregir)
 
     s = sub.add_parser("verificar", help="vuelve a comprobar una preparación")
     s.add_argument("carpeta")

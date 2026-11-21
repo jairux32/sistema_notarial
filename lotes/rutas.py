@@ -73,10 +73,12 @@ class RutaLibro:
     @property
     def orden(self) -> tuple:
         """Clave para recorrer los libros de una serie en su orden natural: mes, números de la carpeta del libro,
-        números del nombre del archivo y, al final, el nombre. Así «dilli 3 julio» (con una i de más) queda antes
+        números del nombre del archivo y, al final, el nombre (si no hay carpeta de mes, el primer mes que nombre el archivo). Así «dilli 3 julio» (con una i de más) queda antes
         de «dili 4 julio», y «prot 4 febrero» no se separa de «proto 3 febrero»."""
-        return (self.mes or 0, numeros(self.libro or ""), numeros(self.archivo.rsplit(".", 1)[0]),
-                plano(self.libro or ""), plano(self.archivo))
+        sin_ext = self.archivo.rsplit(".", 1)[0]
+        # Sin carpeta de mes (p. ej. «ARRIENDOS MAYO - JUNIO 2025.pdf» directo bajo el tipo), el mes lo dice el nombre.
+        mes = self.mes or mes_de(sin_ext) or 0
+        return (mes, numeros(self.libro or ""), numeros(sin_ext), plano(self.libro or ""), plano(self.archivo))
 
 
 def parse_ruta(relativa: str) -> RutaLibro:
