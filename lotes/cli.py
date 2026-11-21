@@ -4,10 +4,11 @@
     simular PDF            analiza un libro y muestra qué actos encontraría; no escribe nada
     serie RAIZ             simula todos los libros de un año+tipo en orden, encadenando la numeración; no escribe nada
     dividir PDF            corta el libro en una carpeta de PREPARACIÓN, la verifica y guarda el informe (no toca el original)
+    aplicar-libro PDF      divide un libro VIEJO y coloca cada acto en su carpeta (con --si); el original se aparta, no se borra
     verificar CARPETA      vuelve a comprobar una preparación contra el original y las sumas guardadas
     informe CARPETA        muestra el informe guardado
 
-Reglas que no se rompen: nada de esto borra, mueve ni modifica un original. Salida 0 = todo bien; 1 = hay algo que revisar;
+Reglas que no se rompen: nada de esto borra ni modifica un original (solo `aplicar-libro --si` lo aparta, tras verificar). Salida 0 = todo bien; 1 = hay algo que revisar;
 2 = error de uso.
 """
 from __future__ import annotations
@@ -19,9 +20,11 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-from . import informe as inf
+from . import antiguos, informe as inf
+from .aplicar import Bloqueado
 from .deteccion import detectar_pdf
 from .division import ArchivoGenerado, dividir, puede_borrar_original, verificar
+from .espacio import Espacio, carpeta_destino
 from .reglas import Resultado, armar_actos, secuenciales_validos
 from .rutas import parse_ruta
 
@@ -154,11 +157,8 @@ def cmd_simular(args) -> int:
 
 
 # ------------------------------------------------------------------ serie
-def cmd_serie(args) -> int:
-    raiz = Path(args.raiz)
-    if not raiz.is_dir():
-        return _error(f"no existe la carpeta {raiz}")
-    tipo = args.tipo.upper()
+def _libros_de_serie(raiz: Path, anio: int, tipo: str) -> list:
+    """Los PDF de una serie (año+tipo) en su orden natural: [(orden, ruta, RutaLibro)]."""
     libros = []
     for base, dirs, files in os.walk(raiz, followlinks=False):
         dirs[:] = [d for d in dirs if d != "lost+found" and not d.startswith(".")]
@@ -166,9 +166,18 @@ def cmd_serie(args) -> int:
             if nombre.lower().endswith(".pdf") and not nombre.startswith("."):
                 p = Path(base) / nombre
                 r = parse_ruta(p.relative_to(raiz).as_posix())
-                if r.ok and r.serie == (args.anio, tipo):
+                if r.ok and r.serie == (anio, tipo):
                     libros.append((r.orden, p, r))
     libros.sort(key=lambda x: x[0])
+    return libros
+
+
+def cmd_serie(args) -> int:
+    raiz = Path(args.raiz)
+    if not raiz.is_dir():
+        return _error(f"no existe la carpeta {raiz}")
+    tipo = args.tipo.upper()
+    libros = _libros_de_serie(raiz, args.anio, tipo)
     if not libros:
         return _error(f"no hay PDF de la serie {args.anio} {tipo} en {raiz}")
     _bajar_prioridad(args.nice)
@@ -239,6 +248,70 @@ def cmd_dividir(args) -> int:
     inf.guardar(prep, info)
     print(inf.texto(info))
     return 0 if puede else 1
+
+
+# ------------------------------------------------------------------ aplicar-libro
+def cmd_aplicar_libro(args) -> int:
+    """Libro VIEJO: sin --si solo muestra el plan; con --si divide, verifica, coloca los actos y aparta el original."""
+    pdf, raiz, datos = Path(args.pdf), Path(args.raiz), Path(args.datos)
+    if not pdf.is_file():
+        return _error(f"no existe {pdf}")
+    if not raiz.is_dir():
+        return _error(f"no existe la raíz del archivo {raiz}")
+    esp = Espacio(datos, raiz)
+    try:
+        anio, tipo, mes, libro_p = antiguos.deducir(esp, pdf)
+    except ValueError as e:
+        return _error(f"no se pudo ubicar el libro en el archivo: {e}")
+    mes, libro = args.mes or mes, args.libro or libro_p
+    if mes is None or libro is None:
+        return _error("no se pudo deducir el " + ("mes" if mes is None else "número de libro")
+                      + " del nombre: indíquelo con --" + ("mes" if mes is None else "libro"))
+    try:
+        destino = carpeta_destino(esp, anio, tipo, mes, libro)
+    except ValueError as e:
+        return _error(str(e))
+    siguientes = None
+    if args.auto_siguiente:
+        libros = _libros_de_serie(raiz, anio, tipo)
+        rutas = [p.resolve() for _, p, _ in libros]
+        i = rutas.index(pdf.resolve()) if pdf.resolve() in rutas else -1
+        if 0 <= i + 1 < len(libros):
+            _, det_sig = detectar_pdf(libros[i + 1][1], dpi=args.dpi, usar_texto=True)
+            siguientes = secuenciales_validos(det_sig, anio, tipo)
+    _bajar_prioridad(args.nice)
+
+    if not args.si:
+        res = _analizar(pdf, anio, tipo, args.ultimo_previo, args.dpi, siguientes=siguientes)
+        print(f"PLAN (no se escribió nada) — {pdf.name} · {res.total_paginas} páginas · serie {anio} {tipo}")
+        print(f"Los actos se colocarían en: {destino}")
+        print(f"El original se apartaría en: {esp.espera / 'originales' / antiguos._relativa(esp, pdf)}")
+        print("\n".join(_resumen_resultado(res)))
+        for bloque, titulo in ((res.ajenos, "No abren acto"), (res.saltos, "Huecos de numeración"), (res.avisos, "Avisos")):
+            if bloque:
+                print(f"\n{titulo}:")
+                print("\n".join(f"  {x if isinstance(x, str) else 'página %s: %s — %s' % x}" for x in bloque))
+        print("\nPara colocarlo de verdad, repita la orden con --si" + (" --aceptar-revision" if res.requiere_revision else "") + ".")
+        return 1 if res.requiere_revision else 0
+
+    esp.asegurar()
+    try:
+        info = antiguos.preparar(esp, pdf, anio, tipo, args.ultimo_previo, siguientes, args.dpi)
+    except ValueError as e:
+        return _error(str(e))
+    if info.get("sin_actos"):
+        print("No se encontró ningún código de acto en el libro: no se divide ni se coloca nada.")
+        return 1
+    print(inf.texto(info))
+    try:
+        hecho = antiguos.aplicar(esp, info["lote"], mes, libro, args.aceptar_revision)
+    except Bloqueado as e:
+        print("\nNO SE COLOCÓ NADA:\n" + "\n".join(f"  · {m}" for m in e.motivos))
+        print(f"La preparación quedó en {esp.preparacion / info['lote']} (se puede revisar con «informe»).")
+        return 1
+    print(f"\nCOLOCADO: {len(hecho['archivos'])} archivos en {hecho['destino']}")
+    print(f"El original quedó apartado en {hecho.get('original_en_espera')} (no se borró).")
+    return 0
 
 
 # ------------------------------------------------------------------ verificar / informe
@@ -329,6 +402,20 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--preparacion", help="carpeta de salida (por omisión «_division_<nombre>» junto al PDF)")
     comunes(s, pdf=True)
     s.set_defaults(f=cmd_dividir)
+
+    s = sub.add_parser("aplicar-libro", help="divide un libro viejo y coloca sus actos (con --si)")
+    s.add_argument("pdf")
+    s.add_argument("--raiz", required=True, help="raíz del archivo escaneado (donde están las carpetas de los años)")
+    s.add_argument("--datos", required=True, help="carpeta de trabajo (preparación y espera)")
+    s.add_argument("--libro", type=int, default=None, help="número de libro (por omisión, el que diga el nombre del archivo)")
+    s.add_argument("--mes", type=int, default=None, help="mes 1-12 (por omisión, el de la carpeta)")
+    s.add_argument("--ultimo-previo", type=int, default=None, help="último secuencial del libro anterior de la serie")
+    s.add_argument("--auto-siguiente", action="store_true", help="lee también el libro que sigue para reconocer un suelto al final")
+    s.add_argument("--si", action="store_true", help="ejecuta de verdad (sin esto solo muestra el plan)")
+    s.add_argument("--aceptar-revision", action="store_true", help="coloca aunque el libro tenga huecos, avisos u hojas sin código")
+    s.add_argument("--dpi", type=int, default=200)
+    s.add_argument("--nice", type=int, default=10)
+    s.set_defaults(f=cmd_aplicar_libro)
 
     s = sub.add_parser("verificar", help="vuelve a comprobar una preparación")
     s.add_argument("carpeta")

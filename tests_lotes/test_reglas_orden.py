@@ -117,3 +117,17 @@ def test_la_cadena_arranca_en_el_ultimo_del_libro_anterior():
     dets, total = libro([900, 101])  # el último del libro anterior fue el 100
     res = armar_actos(dets, total, A, T, ultimo_previo=100)
     assert secs(res) == [101] and [t[-5:] for _, t, _ in res.ajenos] == ["00900"]
+
+
+def test_un_numero_que_falta_pero_aparece_fuera_de_orden_se_dice_donde():
+    # caso real 2026 (hoja 171/191 de `proto 6 abril`): el 811 viene detrás del 812
+    dets = [DeteccionPagina(1, (c(810),)), DeteccionPagina(4, (c(812),)), DeteccionPagina(7, (c(811),)),
+            DeteccionPagina(10, (c(813),))]
+    res = armar_actos(dets, 12, A, T)
+    assert secs(res) == [810, 812, 813]
+    assert res.saltos == ["faltan 00811 antes de 20261101007D00812 (página 4) — el 00811 aparece en la página 7, fuera de orden"]
+
+
+def test_un_numero_que_falta_y_no_aparece_no_lleva_nota():
+    dets = [DeteccionPagina(1, (c(810),)), DeteccionPagina(4, (c(812),))]
+    assert armar_actos(dets, 6, A, T).saltos == ["faltan 00811 antes de 20261101007D00812 (página 4)"]

@@ -171,6 +171,7 @@ def armar_actos(
     actos: list[Acto] = []
     ajenos: list[tuple[int, str, str]] = []
     saltos: list[str] = []
+    huecos: list[tuple[int, int]] = []  # (desde, hasta) de cada salto, para decir dónde aparecen esos números
     avisos: list[str] = []
 
     for pagina in range(1, total_paginas + 1):
@@ -226,9 +227,24 @@ def armar_actos(
                 else f"{ultimo + 1:05d}–{cod.secuencial - 1:05d}"
             )
             saltos.append(f"faltan {faltan} antes de {cod.texto} (página {pagina})")
+            huecos.append((ultimo + 1, cod.secuencial - 1))
 
         actos.append(Acto(cod, inicio=pagina, fin=total_paginas, confianza=confianza, avisos=aviso_acto))
         ultimo = cod.secuencial
+
+    # Un número que «falta» puede estar en el libro pero fuera de orden (p. ej. 811 en la hoja 191, detrás del 812):
+    # se dice, para que la persona lo busque ahí y no en el archivo físico entero.
+    if huecos:
+        presentes: dict[int, list[int]] = {}
+        for p, texto, _ in ajenos:
+            c = parse_codigo(texto)
+            if c and c.notaria == notaria and c.anio == anio and c.tipo == tipo:
+                presentes.setdefault(c.secuencial, []).append(p)
+        for k, (desde, hasta) in enumerate(huecos):
+            donde = [f"el {n:05d} aparece en la página {presentes[n][0]}, fuera de orden"
+                     for n in range(desde, hasta + 1) if n in presentes][:5]
+            if donde:
+                saltos[k] += " — " + "; ".join(donde)
 
     for i, acto in enumerate(actos[:-1]):
         acto.fin = actos[i + 1].inicio - 1
